@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Camera, Check, Trash2, Edit2, AlertCircle, Plus, ScanLine, ArrowLeft, ScanBarcode, Keyboard, Sparkles, RotateCcw, Minus, ChevronDown, Calculator, Loader2 } from 'lucide-react';
-import { SegmentedControl } from '../components/SegmentedControl';
-import { Card } from '../components/Card';
-import { Input } from '../components/Input';
-import { Button } from '../components/Button';
-import { BottomSheet } from '../components/BottomSheet';
+import { Search, Camera, Check, Trash2, Edit2, AlertCircle, Plus, ScanLine, ArrowLeft, ScanBarcode, Keyboard, Sparkles, RotateCcw, Minus, ChevronDown, Calculator } from 'lucide-react';
+import { SegmentedControl } from '../SegmentedControl';
+import { Card } from '../Card';
+import { Input } from '../Input';
+import { Button } from '../Button';
+import { BottomSheet } from '../BottomSheet';
+import { api } from '../../services/api';
+import { MealType, Product, SearchResult } from '../../types';
 
 interface AddSheetProps {
   isOpen: boolean;
@@ -14,24 +16,8 @@ interface AddSheetProps {
   initialMealType?: string;
 }
 
-// Mock Data
-const SEARCH_DB = [
-  { id: 201, name: 'Apple', brand: 'Generic', grams: 150, base: { k: 52, p: 0.3, f: 0.2, c: 14 } },
-  { id: 202, name: 'Apple Juice', brand: 'Tropicana', grams: 250, base: { k: 46, p: 0.1, f: 0.1, c: 11 } },
-  { id: 203, name: 'Apricot', brand: 'Generic', grams: 35, base: { k: 48, p: 1.4, f: 0.4, c: 11 } },
-  { id: 204, name: 'Banana', brand: 'Chiquita', grams: 118, base: { k: 89, p: 1.1, f: 0.3, c: 23 } },
-  { id: 205, name: 'Bagel', brand: 'Store Brand', grams: 95, base: { k: 250, p: 10, f: 1.5, c: 49 } },
-  { id: 206, name: 'Greek Yogurt', brand: 'Chobani', grams: 150, base: { k: 59, p: 10, f: 0.4, c: 3.6 } },
-  { id: 207, name: 'Oatmeal', brand: 'Quaker', grams: 40, base: { k: 379, p: 13, f: 6.5, c: 67 } },
-];
-
-const INITIAL_PRODUCTS = [
-  { id: 101, name: 'Banana', brand: 'Generic', grams: 118, base: { k: 89, p: 1.1, f: 0.3, c: 23 }, kcal: 105 },
-];
-
-const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
-
-const getTimeBasedMealType = () => {
+// Helper to determine default meal type
+const getTimeBasedMealType = (): MealType => {
   const hour = new Date().getHours();
   if (hour >= 4 && hour < 11) return 'Breakfast';
   if (hour >= 11 && hour < 16) return 'Lunch';
@@ -39,7 +25,7 @@ const getTimeBasedMealType = () => {
   return 'Snack';
 };
 
-// Mock Photo Modal - Refined for professional feel
+// --- PHOTO MODAL SUB-COMPONENT ---
 const PhotoModal = ({ onClose, onCapture, mode = 'food' }: { onClose: () => void, onCapture: () => void, mode?: 'food' | 'label' }) => (
   <div className="fixed inset-0 z-[60] bg-black flex flex-col animate-[fadeIn_0.2s_ease-out]">
     <div className="absolute top-0 left-0 right-0 p-4 pt-12 flex flex-col items-center justify-start z-20 pointer-events-none">
@@ -66,7 +52,7 @@ const PhotoModal = ({ onClose, onCapture, mode = 'food' }: { onClose: () => void
   </div>
 );
 
-const AddSheet: React.FC<AddSheetProps> = ({ 
+export const AddSheet: React.FC<AddSheetProps> = ({ 
   isOpen, 
   onClose, 
   onSave, 
@@ -74,29 +60,34 @@ const AddSheet: React.FC<AddSheetProps> = ({
   initialMealType
 }) => {
   const [sheetView, setSheetView] = useState<'main' | 'custom' | 'edit_nutrition'>('main');
-  
-  // States
-  const [mealType, setMealType] = useState('Breakfast');
+  const [mealType, setMealType] = useState<MealType>('Breakfast');
   const [inputMethod, setInputMethod] = useState<'search' | 'photo'>('search');
-  const [products, setProducts] = useState(INITIAL_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>([]);
+  
+  // Search State
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<typeof SEARCH_DB>([]);
-  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
-  const [photoMode, setPhotoMode] = useState<'food' | 'label'>('food');
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [toast, setToast] = useState<{ id: number; item: any; index: number } | null>(null);
-  const editInputRef = useRef<HTMLInputElement>(null);
-  const [advancedEditId, setAdvancedEditId] = useState<number | null>(null);
-  const [advancedForm, setAdvancedForm] = useState({ k: '', p: '', f: '', c: '' });
-  const [detectedItems, setDetectedItems] = useState<any[]>([]);
-  const [recognitionState, setRecognitionState] = useState<'idle' | 'success' | 'empty'>('idle');
-  const [customMethod, setCustomMethod] = useState<'manual' | 'label'>('manual');
-  const [customForm, setCustomForm] = useState({ name: '', brand: '', kcal: '', p: '', f: '', c: '' });
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Photo / Custom State
+  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
+  const [photoMode, setPhotoMode] = useState<'food' | 'label'>('food');
+  const [detectedItems, setDetectedItems] = useState<any[]>([]); // Using 'any' for detected items as they have confidence props
+  const [customMethod, setCustomMethod] = useState<'manual' | 'label'>('manual');
+  const [customForm, setCustomForm] = useState({ name: '', brand: '', kcal: '', p: '', f: '', c: '' });
+  
+  // Edit State
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [advancedEditId, setAdvancedEditId] = useState<number | null>(null);
+  const [advancedForm, setAdvancedForm] = useState({ k: '', p: '', f: '', c: '' });
+  const editInputRef = useRef<HTMLInputElement>(null);
+  
+  // Status
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ id: number; item: Product; index: number } | null>(null);
+
+  // Reset state on open
   useEffect(() => {
     if (isOpen) {
       setSheetView('main');
@@ -104,27 +95,31 @@ const AddSheet: React.FC<AddSheetProps> = ({
       setSearchResults([]);
       setInputMethod('search');
       setDetectedItems([]);
-      setRecognitionState('idle');
+      setProducts([]); // Start clean or load initials if needed
       setEditingId(null);
       setAdvancedEditId(null);
       setToast(null);
       setCustomForm({ name: '', brand: '', kcal: '', p: '', f: '', c: '' });
       setIsSaving(false);
       setSaveError(null);
-      setMealType(initialMealType || getTimeBasedMealType());
+      setMealType((initialMealType as MealType) || getTimeBasedMealType());
     }
   }, [isOpen, initialMealType]);
 
-  // Effects
+  // Handle Search
   useEffect(() => {
-    if (searchQuery.trim().length > 0) {
-      const results = SEARCH_DB.filter(item => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
-      setSearchResults(results);
-    } else {
-      setSearchResults([]);
-    }
+    const timer = setTimeout(async () => {
+      if (searchQuery.trim().length > 0) {
+        const results = await api.products.search(searchQuery);
+        setSearchResults(results);
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  // Auto-focus search
   useEffect(() => {
     if (isOpen && inputMethod === 'search' && sheetView === 'main' && !editingId) {
       const timer = setTimeout(() => searchInputRef.current?.focus(), 300);
@@ -132,64 +127,73 @@ const AddSheet: React.FC<AddSheetProps> = ({
     }
   }, [isOpen, inputMethod, sheetView, editingId]);
 
+  // Auto-focus edit
   useEffect(() => {
     if (editingId && editInputRef.current) editInputRef.current.select();
   }, [editingId]);
 
-  // Handlers
+  // --- LOGIC HELPERS ---
+
   const calculateKcal = (grams: number, baseKcal: number) => Math.round((grams / 100) * baseKcal);
 
-  const handleAddProduct = (item: typeof SEARCH_DB[0]) => {
+  const handleAddProduct = (item: SearchResult) => {
     const totalKcal = calculateKcal(item.grams, item.base.k);
-    setProducts(prev => [...prev, { ...item, id: Date.now(), kcal: totalKcal }]);
+    const newProduct: Product = { ...item, id: Date.now(), kcal: totalKcal };
+    setProducts(prev => [...prev, newProduct]);
     setSearchQuery('');
     setSearchResults([]);
   };
 
-  const openFoodScanner = () => {
-    setPhotoMode('food');
-    setIsPhotoModalOpen(true);
-  };
-
   const handlePhotoCapture = () => {
-      setIsPhotoModalOpen(false);
-      if (photoMode === 'food') {
-          const mockDetected = [
-              { id: Date.now() + 1, name: 'Grilled Chicken', grams: 150, base: { k: 165, p: 31, f: 3.6, c: 0 }, kcal: 248, confidence: 'High' },
-              { id: Date.now() + 2, name: 'Steamed Broccoli', grams: 80, base: { k: 34, p: 2.8, f: 0.4, c: 7 }, kcal: 27, confidence: 'High' },
-          ];
-          setDetectedItems(mockDetected.length > 0 ? mockDetected : []);
-          setRecognitionState(mockDetected.length > 0 ? 'success' : 'empty');
-      } else {
-          setCustomForm(prev => ({ ...prev, kcal: '120', p: '12', f: '0', c: '14' }));
-      }
+    setIsPhotoModalOpen(false);
+    if (photoMode === 'food') {
+      // Mock detection result
+      const mockDetected = [
+        { id: Date.now() + 1, name: 'Grilled Chicken', grams: 150, base: { k: 165, p: 31, f: 3.6, c: 0 }, kcal: 248, confidence: 'High' },
+        { id: Date.now() + 2, name: 'Steamed Broccoli', grams: 80, base: { k: 34, p: 2.8, f: 0.4, c: 7 }, kcal: 27, confidence: 'High' },
+      ];
+      setDetectedItems(mockDetected);
+    } else {
+      setCustomForm(prev => ({ ...prev, kcal: '120', p: '12', f: '0', c: '14' }));
+    }
   };
 
   const handleAddDetectedItems = () => {
-      setProducts(prev => [...prev, ...detectedItems.map(item => ({ ...item, id: Date.now() + Math.random() }))]);
-      setDetectedItems([]);
-      setRecognitionState('idle');
-  };
-
-  const removeDetectedItem = (id: number) => {
-      setDetectedItems(prev => prev.filter(i => i.id !== id));
-      if (detectedItems.length <= 1) setRecognitionState('idle');
+    // Transform detected items to Products
+    const newProducts: Product[] = detectedItems.map(item => ({
+      id: Date.now() + Math.random(),
+      name: item.name,
+      grams: item.grams,
+      base: item.base,
+      kcal: item.kcal,
+      brand: 'Detected'
+    }));
+    setProducts(prev => [...prev, ...newProducts]);
+    setDetectedItems([]);
   };
 
   const saveCustomProduct = () => {
-      if (!customForm.name) return;
-      const baseK = parseInt(customForm.kcal) || 0;
-      const newProduct = {
-          id: Date.now(),
-          name: customForm.name,
-          brand: customForm.brand || 'Custom',
-          grams: 100,
-          base: { k: baseK, p: parseFloat(customForm.p)||0, f: parseFloat(customForm.f)||0, c: parseFloat(customForm.c)||0 },
-          kcal: baseK
-      };
-      setProducts(prev => [...prev, newProduct]);
-      setSheetView('main');
-      setCustomForm({ name: '', brand: '', kcal: '', p: '', f: '', c: '' });
+    if (!customForm.name) return;
+    const baseK = parseInt(customForm.kcal) || 0;
+    const newProduct: Product = {
+        id: Date.now(),
+        name: customForm.name,
+        brand: customForm.brand || 'Custom',
+        grams: 100,
+        base: { k: baseK, p: parseFloat(customForm.p)||0, f: parseFloat(customForm.f)||0, c: parseFloat(customForm.c)||0 },
+        kcal: baseK
+    };
+    setProducts(prev => [...prev, newProduct]);
+    setSheetView('main');
+    setCustomForm({ name: '', brand: '', kcal: '', p: '', f: '', c: '' });
+  };
+
+  const updateGrams = (id: number, newGrams: number) => {
+    if (newGrams < 0) newGrams = 0;
+    setProducts(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      return { ...p, grams: newGrams, kcal: calculateKcal(newGrams, p.base.k) };
+    }));
   };
 
   const handleDelete = (id: number) => {
@@ -205,63 +209,73 @@ const AddSheet: React.FC<AddSheetProps> = ({
   const handleUndo = () => {
     if (!toast) return;
     setProducts(prev => {
-        const newProducts = [...prev];
-        newProducts.splice(toast.index, 0, toast.item);
-        return newProducts;
+      const newProducts = [...prev];
+      newProducts.splice(toast.index, 0, toast.item);
+      return newProducts;
     });
     setToast(null);
   };
 
-  const updateGrams = (id: number, newGrams: number) => {
-    if (newGrams < 0) newGrams = 0;
-    setProducts(prev => prev.map(p => {
-        if (p.id !== id) return p;
-        return { ...p, grams: newGrams, kcal: calculateKcal(newGrams, p.base.k) };
-    }));
-  };
-
-  const openAdvancedEdit = (product: any) => {
-      setAdvancedEditId(product.id);
-      setAdvancedForm({ k: product.base.k.toString(), p: product.base.p.toString(), f: product.base.f.toString(), c: product.base.c.toString() });
-      setSheetView('edit_nutrition');
+  // Advanced Edit Logic
+  const openAdvancedEdit = (product: Product) => {
+    setAdvancedEditId(product.id);
+    setAdvancedForm({ 
+      k: product.base.k.toString(), 
+      p: product.base.p.toString(), 
+      f: product.base.f.toString(), 
+      c: product.base.c.toString() 
+    });
+    setSheetView('edit_nutrition');
   };
 
   const saveAdvancedEdit = () => {
-      if (advancedEditId === null) return;
-      const newBase = { k: parseInt(advancedForm.k)||0, p: parseFloat(advancedForm.p)||0, f: parseFloat(advancedForm.f)||0, c: parseFloat(advancedForm.c)||0 };
-      setProducts(prev => prev.map(p => {
-          if (p.id !== advancedEditId) return p;
-          return { ...p, base: newBase, kcal: calculateKcal(p.grams, newBase.k) };
-      }));
-      setSheetView('main');
-      setAdvancedEditId(null);
+    if (advancedEditId === null) return;
+    const newBase = { 
+      k: parseInt(advancedForm.k)||0, 
+      p: parseFloat(advancedForm.p)||0, 
+      f: parseFloat(advancedForm.f)||0, 
+      c: parseFloat(advancedForm.c)||0 
+    };
+    setProducts(prev => prev.map(p => {
+      if (p.id !== advancedEditId) return p;
+      return { ...p, base: newBase, kcal: calculateKcal(p.grams, newBase.k) };
+    }));
+    setSheetView('main');
+    setAdvancedEditId(null);
   };
 
   const handleConfirm = async () => {
-      if (products.length === 0 || products.some(p => !p.grams || p.grams <= 0)) return;
-      if (isOffline) {
-          setSaveError("No connection");
-          setTimeout(() => setSaveError(null), 3000);
-          return;
-      }
-      setIsSaving(true);
-      setSaveError(null);
-      try {
-          await new Promise(resolve => setTimeout(resolve, 1200));
-          onSave(); 
-      } catch (e) {
-          setIsSaving(false);
-          setSaveError("Failed to save.");
-      }
+    if (products.length === 0 || products.some(p => !p.grams || p.grams <= 0)) return;
+    if (isOffline) {
+        setSaveError("No connection");
+        setTimeout(() => setSaveError(null), 3000);
+        return;
+    }
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+        await api.meals.add({
+          time: new Date().toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit', hour12: false}),
+          title: mealType,
+          kcal: products.reduce((acc, p) => acc + p.kcal, 0),
+          items: products
+        });
+        onSave(); 
+    } catch (e) {
+        setIsSaving(false);
+        setSaveError("Failed to save.");
+    }
   };
 
-  // Helper Props for BottomSheet
+  // --- RENDER HELPERS ---
+  
   let titleNode: React.ReactNode = initialMealType ? `Add to ${initialMealType}` : 'Add Meal';
   let leftActionNode: React.ReactNode = undefined;
   let footerNode: React.ReactNode = undefined;
 
   const isConfirmDisabled = products.length === 0 || products.some(p => !p.grams || p.grams <= 0) || isSaving;
 
+  // View Routing for Header/Footer
   if (sheetView === 'main') {
       footerNode = (
         <div className="space-y-3">
@@ -314,6 +328,8 @@ const AddSheet: React.FC<AddSheetProps> = ({
       );
   }
 
+  const MEAL_OPTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(type => ({ label: type, value: type }));
+
   return (
     <>
       {isPhotoModalOpen && <PhotoModal mode={photoMode} onClose={() => setIsPhotoModalOpen(false)} onCapture={handlePhotoCapture} />}
@@ -331,9 +347,9 @@ const AddSheet: React.FC<AddSheetProps> = ({
                     <div className="mb-6">
                         <SegmentedControl
                             value={mealType}
-                            onChange={(val) => setMealType(val as string)}
+                            onChange={(val) => setMealType(val as MealType)}
                             disabled={isOffline}
-                            options={MEAL_TYPES.map(type => ({ label: type, value: type }))}
+                            options={MEAL_OPTIONS}
                         />
                     </div>
                 )}
@@ -390,7 +406,7 @@ const AddSheet: React.FC<AddSheetProps> = ({
                     ) : (
                         <div className="h-32 rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 flex flex-col items-center justify-center gap-3 transition-colors hover:bg-gray-100 hover:border-gray-300">
                             <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm text-blue-600"><Camera size={24} /></div>
-                            <button onClick={openFoodScanner} className="text-sm font-semibold text-blue-600">Tap to take photo</button>
+                            <button onClick={() => { setPhotoMode('food'); setIsPhotoModalOpen(true); }} className="text-sm font-semibold text-blue-600">Tap to take photo</button>
                         </div>
                     )}
                 </div>
@@ -419,7 +435,7 @@ const AddSheet: React.FC<AddSheetProps> = ({
                                             <span className="text-[10px] bg-white text-blue-600 px-1.5 py-0.5 rounded border border-blue-100 font-bold">{item.confidence === 'High' ? 'High Conf.' : 'Detected'}</span>
                                         </div>
                                     </div>
-                                     <div className="w-[4.5rem] flex-shrink-0 snap-center bg-rose-500 flex items-center justify-center text-white cursor-pointer ml-[-1rem] pl-4 rounded-r-2xl" onClick={() => removeDetectedItem(item.id)}>
+                                     <div className="w-[4.5rem] flex-shrink-0 snap-center bg-rose-500 flex items-center justify-center text-white cursor-pointer ml-[-1rem] pl-4 rounded-r-2xl" onClick={() => setDetectedItems(prev => prev.filter(i => i.id !== item.id))}>
                                         <Trash2 size={18} />
                                     </div>
                                 </div>
@@ -561,5 +577,3 @@ const AddSheet: React.FC<AddSheetProps> = ({
     </>
   );
 };
-
-export default AddSheet;

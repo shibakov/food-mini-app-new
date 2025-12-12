@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Check } from 'lucide-react';
-import { SegmentedControl } from '../components/SegmentedControl';
-import { Card } from '../components/Card';
-import { Input } from '../components/Input';
-import { Button } from '../components/Button';
-import { BottomSheet } from '../components/BottomSheet';
+import { SegmentedControl } from '../SegmentedControl';
+import { Card } from '../Card';
+import { Input } from '../Input';
+import { Button } from '../Button';
+import { BottomSheet } from '../BottomSheet';
+import { api } from '../../services/api';
+import { AppSettings } from '../../types';
 
 interface SettingsSheetProps {
   isOpen: boolean;
@@ -12,18 +14,21 @@ interface SettingsSheetProps {
   isOffline?: boolean;
 }
 
-const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, isOffline = false }) => {
+export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, isOffline = false }) => {
   const [calorieTarget, setCalorieTarget] = useState('2000');
   const [tolerance, setTolerance] = useState(100);
   const [macroMode, setMacroMode] = useState<'percent' | 'grams'>('percent');
   const [macros, setMacros] = useState({ p: '30', f: '35', c: '35' });
 
+  // Load Settings
   useEffect(() => {
     if (isOpen) {
-      setCalorieTarget('2000');
-      setTolerance(100);
-      setMacroMode('percent');
-      setMacros({ p: '30', f: '35', c: '35' });
+      api.settings.get().then(settings => {
+        setCalorieTarget(settings.calorieTarget.toString());
+        setTolerance(settings.tolerance);
+        setMacroMode(settings.macroMode);
+        setMacros(settings.macros);
+      });
     }
   }, [isOpen]);
 
@@ -43,8 +48,16 @@ const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, isOfflin
       if (derivedKcal > targetVal) validationError = `Macros (${Math.round(derivedKcal)} kcal) exceed daily limit`;
   }
 
-  const handleSave = () => {
-    if (!validationError && !isOffline) onClose();
+  const handleSave = async () => {
+    if (!validationError && !isOffline) {
+      await api.settings.save({
+        calorieTarget: targetVal,
+        tolerance,
+        macroMode,
+        macros
+      });
+      onClose();
+    }
   };
 
   const handleMacroChange = (key: 'p' | 'f' | 'c', value: string) => setMacros(prev => ({ ...prev, [key]: value }));
@@ -184,5 +197,3 @@ const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, isOfflin
     </BottomSheet>
   );
 };
-
-export default SettingsSheet;

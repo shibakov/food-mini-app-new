@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Home, Plus, BarChart2, WifiOff, RotateCcw } from 'lucide-react';
 import MainScreen from './screens/MainScreen';
 import StatsScreen from './screens/StatsScreen';
-import AddSheet from './screens/AddSheet';
-import SettingsSheet from './screens/SettingsSheet';
+import { AddSheet } from './components/sheets/AddSheet';
+import { SettingsSheet } from './components/sheets/SettingsSheet';
 
-// Simple navigation types
 type Tab = 'main' | 'stats';
 
 export default function App() {
@@ -14,12 +13,9 @@ export default function App() {
   // Sheet Management
   const [isAddSheetOpen, setIsAddSheetOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  
-  // Context for Add Sheet (Routing behavior)
-  // Keeps track if we are adding to a specific existing meal
   const [addSheetInitialType, setAddSheetInitialType] = useState<string | undefined>(undefined);
 
-  // Wireframe UI States
+  // Global UI State
   const [isLoading, setIsLoading] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [isEmpty, setIsEmpty] = useState(false);
@@ -33,48 +29,35 @@ export default function App() {
     }
   }, [toast]);
 
+  // Actions
   const showUndoToast = () => {
     setToast({
       message: 'Meal deleted',
       onUndo: () => {
         setToast(null);
-        // Logic to restore would go here
+        // Logic to restore would call Service here
       }
     });
   };
 
-  // --- Navigation & Routing Handlers ---
-
-  // Entry Point 1 & 2: Center Nav Button OR Main Screen CTA
   const openGenericAddSheet = () => {
-    setAddSheetInitialType(undefined); // No specific type pre-selected
+    setAddSheetInitialType(undefined);
     setIsAddSheetOpen(true);
   };
 
-  // Entry Point 3: Inside existing meal (Edit/Add to specific)
   const openEditMealSheet = (mealType: string) => {
-    setAddSheetInitialType(mealType); // Pre-select the meal type
+    setAddSheetInitialType(mealType);
     setIsAddSheetOpen(true);
   };
 
-  // Exit Behavior: Save/Confirm
   const handleAddSheetSave = () => {
     setIsAddSheetOpen(false);
-    // Rule: On Confirm, return to Main (same day)
-    // If we were on Stats, this switches us back to Main to see the new entry
     setActiveTab('main');
-  };
-
-  // Exit Behavior: Cancel/Dismiss
-  const handleAddSheetClose = () => {
-    setIsAddSheetOpen(false);
-    // Rule: On Cancel, return to previous screen/state unchanged
-    // No activeTab change needed
+    setIsEmpty(false); // Assume adding a meal makes it not empty
   };
 
   const isOverlayOpen = isAddSheetOpen || isSettingsOpen;
 
-  // Render the active screen content
   const renderContent = () => {
     switch (activeTab) {
       case 'main':
@@ -87,6 +70,8 @@ export default function App() {
             isOffline={isOffline}
             isEmpty={isEmpty}
             onDeleteMeal={showUndoToast}
+            setIsEmpty={setIsEmpty}
+            setIsLoading={setIsLoading}
           />
         );
       case 'stats':
@@ -103,17 +88,17 @@ export default function App() {
   };
 
   return (
-    <div className="relative h-screen w-full max-w-md mx-auto bg-gray-50 overflow-hidden flex flex-col shadow-2xl text-gray-900 font-sans">
+    <div className="relative h-screen w-full max-w-md mx-auto bg-gray-50 overflow-hidden flex flex-col shadow-2xl text-gray-900 font-sans selection:bg-blue-100 selection:text-blue-900">
       
       {/* Offline Indicator */}
       {isOffline && (
-        <div className="bg-gray-800/90 backdrop-blur-sm text-white text-[11px] font-semibold py-1.5 text-center flex items-center justify-center gap-2 z-50 absolute top-0 left-0 right-0">
+        <div className="bg-gray-900/95 backdrop-blur-sm text-white/90 text-[11px] font-semibold py-2 text-center flex items-center justify-center gap-2 z-50 absolute top-0 left-0 right-0 shadow-sm">
           <WifiOff size={12} />
           <span>Offline Mode</span>
         </div>
       )}
 
-      {/* Main Content Area - Scrollable */}
+      {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto no-scrollbar pb-24 relative">
         {renderContent()}
       </main>
@@ -121,7 +106,7 @@ export default function App() {
       {/* Overlays */}
       <AddSheet 
         isOpen={isAddSheetOpen} 
-        onClose={handleAddSheetClose} 
+        onClose={() => setIsAddSheetOpen(false)} 
         onSave={handleAddSheetSave}
         initialMealType={addSheetInitialType}
         isOffline={isOffline}
@@ -134,53 +119,53 @@ export default function App() {
 
       {/* Toast Notification */}
       {toast && (
-        <div className="absolute bottom-24 left-4 right-4 bg-gray-900/90 backdrop-blur-md text-white px-4 py-3.5 rounded-2xl shadow-xl flex items-center justify-between z-50 animate-[slideUp_0.2s_ease-out]">
-          <span className="text-sm font-medium">{toast.message}</span>
+        <div className="absolute bottom-24 left-4 right-4 bg-gray-900/95 backdrop-blur-xl text-white px-4 py-3.5 rounded-2xl shadow-xl flex items-center justify-between z-50 animate-[slideUp_0.2s_cubic-bezier(0.2,0,0,1)] ring-1 ring-white/10">
+          <span className="text-sm font-medium tracking-wide">{toast.message}</span>
           {toast.onUndo && (
             <button 
               onClick={toast.onUndo}
-              className="text-blue-400 text-sm font-semibold flex items-center gap-1.5 active:opacity-70"
+              className="text-blue-400 text-sm font-bold flex items-center gap-1.5 active:opacity-70 transition-opacity"
             >
-              <RotateCcw size={16} />
+              <RotateCcw size={16} strokeWidth={2.5} />
               Undo
             </button>
           )}
         </div>
       )}
 
-      {/* Bottom Navigation - Hidden when overlay is open */}
+      {/* Bottom Navigation */}
       {!isOverlayOpen && (
-        <nav className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-gray-200 h-[84px] pb-6 px-8 flex justify-between items-center z-40">
+        <nav className="absolute bottom-0 left-0 right-0 bg-white/80 backdrop-blur-2xl border-t border-gray-100 h-[88px] pb-6 px-10 flex justify-between items-center z-40 transition-all duration-300">
           <button 
             onClick={() => setActiveTab('main')}
-            className={`flex flex-col items-center justify-center space-y-1 w-16 transition-colors ${activeTab === 'main' ? 'text-blue-600' : 'text-gray-400'}`}
+            className={`flex flex-col items-center justify-center space-y-1.5 w-16 transition-all duration-200 group ${activeTab === 'main' ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
           >
-            <Home size={26} strokeWidth={activeTab === 'main' ? 2.5 : 2} />
-            <span className="text-[10px] font-medium tracking-wide">Main</span>
+            <Home size={24} strokeWidth={activeTab === 'main' ? 2.5 : 2} className="group-active:scale-90 transition-transform" />
+            <span className="text-[10px] font-semibold tracking-wide">Main</span>
           </button>
 
           <button 
             onClick={() => !isOffline && openGenericAddSheet()}
             disabled={isOffline}
-            className={`flex flex-col items-center justify-center -mt-8 transition-all ${isOffline ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}`}
+            className={`flex flex-col items-center justify-center -mt-8 group ${isOffline ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            <div className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center shadow-lg shadow-blue-600/30">
-              <Plus size={30} color="white" strokeWidth={2.5} />
+            <div className="w-14 h-14 bg-gray-900 rounded-2xl flex items-center justify-center shadow-lg shadow-gray-900/20 group-hover:bg-black group-hover:scale-105 group-active:scale-95 transition-all duration-300">
+              <Plus size={28} color="white" strokeWidth={2.5} />
             </div>
           </button>
 
           <button 
             onClick={() => setActiveTab('stats')}
-            className={`flex flex-col items-center justify-center space-y-1 w-16 transition-colors ${activeTab === 'stats' ? 'text-blue-600' : 'text-gray-400'}`}
+            className={`flex flex-col items-center justify-center space-y-1.5 w-16 transition-all duration-200 group ${activeTab === 'stats' ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
           >
-            <BarChart2 size={26} strokeWidth={activeTab === 'stats' ? 2.5 : 2} />
-            <span className="text-[10px] font-medium tracking-wide">Stats</span>
+            <BarChart2 size={24} strokeWidth={activeTab === 'stats' ? 2.5 : 2} className="group-active:scale-90 transition-transform" />
+            <span className="text-[10px] font-semibold tracking-wide">Stats</span>
           </button>
         </nav>
       )}
 
-      {/* DEV TOOLS: Toggle States */}
-      <div className="fixed top-20 right-0 p-2 flex flex-col gap-1 z-50 opacity-20 hover:opacity-100 transition-opacity bg-white/80 backdrop-blur rounded-l-lg border border-r-0 border-gray-200 shadow-sm">
+      {/* DEV TOOLS */}
+      <div className="fixed top-20 right-0 p-2 flex flex-col gap-1 z-50 opacity-0 hover:opacity-100 transition-opacity bg-white/80 backdrop-blur rounded-l-lg border border-r-0 border-gray-200 shadow-sm pointer-events-none hover:pointer-events-auto">
         <button onClick={() => setIsLoading(!isLoading)} className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded font-mono text-gray-600">
           {isLoading ? 'Stop Load' : 'Load'}
         </button>
