@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Search, Camera, Check, Trash2, Edit2, AlertCircle, Plus, ScanLine, ArrowLeft, ScanBarcode, Keyboard, Sparkles, RotateCcw, Minus, ChevronRight, Calculator, Loader2 } from 'lucide-react';
+import { X, Search, Camera, Check, Trash2, Edit2, AlertCircle, Plus, ScanLine, ArrowLeft, ScanBarcode, Keyboard, Sparkles, RotateCcw, Minus, ChevronRight, Calculator, Loader2, ChevronDown } from 'lucide-react';
+import { SegmentedControl } from '../components/SegmentedControl';
 
 interface AddSheetProps {
   isOpen: boolean;
@@ -39,11 +40,18 @@ const getTimeBasedMealType = () => {
 // Mock Photo Modal Component
 const PhotoModal = ({ onClose, onCapture, mode = 'food' }: { onClose: () => void, onCapture: () => void, mode?: 'food' | 'label' }) => (
   <div className="fixed inset-0 z-[60] bg-black flex flex-col animate-[fadeIn_0.2s_ease-out]">
-    <div className="absolute top-0 left-0 right-0 p-4 flex justify-end z-10">
+    {/* Global Rule: Swipe down affordance for full screen modal */}
+    <div className="absolute top-0 left-0 right-0 p-4 pt-12 flex flex-col items-center justify-start z-20 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+        <ChevronDown className="text-white/50 animate-bounce mb-1" size={24} />
+        <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Swipe down to close</span>
+    </div>
+
+    <div className="absolute top-4 right-4 z-30">
       <button onClick={onClose} className="p-2 bg-gray-900/50 backdrop-blur-md rounded-full text-white">
         <X size={24} />
       </button>
     </div>
+    
     <div className="flex-1 flex flex-col items-center justify-center gap-4">
         <div className="w-64 h-64 border-2 border-white/30 rounded-3xl flex items-center justify-center relative overflow-hidden">
             {mode === 'label' ? <ScanBarcode size={48} className="text-white/50 animate-pulse" /> : <ScanLine size={48} className="text-white/50 animate-pulse" />}
@@ -386,26 +394,26 @@ const AddSheet: React.FC<AddSheetProps> = ({
                 </div>
 
                 {shouldShowMealSelector && (
-                <div className={`grid grid-cols-4 gap-2 mb-6 ${isOffline ? 'opacity-50 pointer-events-none' : ''}`}>
-                    {MEAL_TYPES.map((type) => (
-                        <button 
-                            key={type}
-                            onClick={() => setMealType(type)}
-                            className={`py-2.5 rounded-xl text-xs font-bold transition-all ${mealType === type ? 'bg-blue-600 text-white shadow-md scale-[1.02]' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-                        >
-                        {type}
-                        </button>
-                    ))}
-                </div>
+                    <div className="mb-6">
+                        <SegmentedControl
+                            value={mealType}
+                            onChange={(val) => setMealType(val as string)}
+                            disabled={isOffline}
+                            options={MEAL_TYPES.map(type => ({ label: type, value: type }))}
+                        />
+                    </div>
                 )}
 
-                <div className={`bg-gray-100 p-1 rounded-xl flex mb-6 ${isOffline ? 'opacity-50 pointer-events-none' : ''}`}>
-                    <button onClick={() => setInputMethod('search')} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all ${inputMethod === 'search' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-                        <Search size={16} /> Search
-                    </button>
-                    <button onClick={() => setInputMethod('photo')} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all ${inputMethod === 'photo' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-                        <Camera size={16} /> Photo
-                    </button>
+                <div className="mb-6">
+                    <SegmentedControl
+                        value={inputMethod}
+                        onChange={(v) => setInputMethod(v as 'search' | 'photo')}
+                        disabled={isOffline}
+                        options={[
+                            { label: 'Search', value: 'search', icon: <Search size={14} /> },
+                            { label: 'Photo', value: 'photo', icon: <Camera size={14} /> }
+                        ]}
+                    />
                 </div>
 
                 {/* Input Area */}
@@ -644,13 +652,16 @@ const AddSheet: React.FC<AddSheetProps> = ({
                     <h2 className="text-xl font-bold text-gray-900">New Product</h2>
                 </div>
 
-                <div className="bg-gray-100 p-1 rounded-xl flex mb-6">
-                    <button onClick={() => setCustomMethod('manual')} className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold uppercase tracking-wide rounded-lg transition-all ${customMethod === 'manual' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}>
-                        <Keyboard size={14} /> Manual
-                    </button>
-                    <button onClick={() => setCustomMethod('label')} className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold uppercase tracking-wide rounded-lg transition-all ${customMethod === 'label' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}`}>
-                        <ScanBarcode size={14} /> Scan Label
-                    </button>
+                <div className="mb-6">
+                    <SegmentedControl
+                        value={customMethod}
+                        onChange={(v) => setCustomMethod(v as 'manual' | 'label')}
+                        disabled={isOffline}
+                        options={[
+                            { label: 'Manual', value: 'manual', icon: <Keyboard size={14} /> },
+                            { label: 'Scan Label', value: 'label', icon: <ScanBarcode size={14} /> }
+                        ]}
+                    />
                 </div>
 
                 <div className="flex-1 overflow-y-auto no-scrollbar pb-4">

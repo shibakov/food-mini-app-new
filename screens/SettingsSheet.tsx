@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check, AlertCircle, Info } from 'lucide-react';
+import { SegmentedControl } from '../components/SegmentedControl';
 
 interface SettingsSheetProps {
   isOpen: boolean;
@@ -88,15 +89,16 @@ const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, isOfflin
           </button>
         </div>
 
-        <div className={`space-y-8 overflow-y-auto no-scrollbar pb-4 ${isOffline ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className={`space-y-8 overflow-y-auto no-scrollbar pb-4 ${isOffline ? 'opacity-70' : ''}`}>
           
           {/* 1) Calorie Target */}
           <div className="space-y-3">
             <label className="text-sm font-semibold text-gray-900">Daily Calorie Target</label>
-            <div className="flex items-center border border-gray-200 rounded-2xl px-5 h-14 bg-gray-50 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all shadow-sm">
+            <div className={`flex items-center border rounded-2xl px-5 h-14 bg-gray-50 transition-all shadow-sm ${isOffline ? 'border-gray-200' : 'border-gray-200 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500'}`}>
               <input 
                 type="number" 
-                className="flex-1 bg-transparent outline-none text-xl font-bold text-gray-900 placeholder-gray-400"
+                disabled={isOffline}
+                className="flex-1 bg-transparent outline-none text-xl font-bold text-gray-900 placeholder-gray-400 disabled:text-gray-400"
                 value={calorieTarget}
                 onChange={(e) => setCalorieTarget(e.target.value)}
                 placeholder="2000"
@@ -109,12 +111,12 @@ const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, isOfflin
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <label className="text-sm font-semibold text-gray-900">Tolerance Range</label>
-              <div className="bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-xs font-mono font-bold">
+              <div className={`bg-blue-50 text-blue-700 px-2 py-1 rounded-md text-xs font-mono font-bold ${isOffline ? 'opacity-50' : ''}`}>
                   ±{tolerance} kcal
               </div>
             </div>
             
-            <div className="relative h-10 flex items-center">
+            <div className={`relative h-10 flex items-center ${isOffline ? 'pointer-events-none' : ''}`}>
                 {/* Track */}
                 <div className="absolute left-0 right-0 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full bg-blue-100 w-full" />
@@ -131,14 +133,15 @@ const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, isOfflin
                     min="50" 
                     max="250" 
                     step="50"
+                    disabled={isOffline}
                     value={tolerance}
                     onChange={(e) => setTolerance(Number(e.target.value))}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                 />
-                {/* Custom Thumb (Visual Only - simplified representation via CSS styling usually, here reliant on standard range input visually aligned) */}
+                {/* Custom Thumb */}
                 <div 
                     className="absolute h-5 w-5 bg-blue-600 rounded-full shadow border-2 border-white pointer-events-none transition-all"
-                    style={{ left: `${((tolerance - 50) / 200) * 100}%`, transform: 'translateX(-50%)' }}
+                    style={{ left: `${((tolerance - 50) / 200) * 100}%`, transform: 'translateX(-50%)', backgroundColor: isOffline ? '#9ca3af' : '' }}
                 />
             </div>
             <p className="text-[11px] text-gray-400 font-medium">
@@ -150,21 +153,19 @@ const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, isOfflin
           <div className="space-y-4">
             <div className="flex justify-between items-center">
                 <label className="text-sm font-semibold text-gray-900">Macro Goals</label>
-                <div className="flex bg-gray-100 p-0.5 rounded-lg">
-                    <button 
-                        onClick={() => { setMacroMode('percent'); setMacros({ p: '30', f: '35', c: '35' }); }}
-                        className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide rounded-md transition-all ${macroMode === 'percent' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-                    >
-                        Percent %
-                    </button>
-                    <button 
-                        onClick={() => { setMacroMode('grams'); setMacros({ p: '150', f: '60', c: '200' }); }}
-                        className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide rounded-md transition-all ${macroMode === 'grams' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-                    >
-                        Grams g
-                    </button>
-                </div>
             </div>
+            <SegmentedControl
+                value={macroMode}
+                onChange={(v) => {
+                    setMacroMode(v as 'percent' | 'grams');
+                    setMacros(v === 'percent' ? { p: '30', f: '35', c: '35' } : { p: '150', f: '60', c: '200' });
+                }}
+                disabled={isOffline}
+                options={[
+                    { label: 'Percent %', value: 'percent' },
+                    { label: 'Grams g', value: 'grams' }
+                ]}
+            />
 
             {/* Macro Inputs */}
             <div className="grid grid-cols-3 gap-3">
@@ -173,10 +174,11 @@ const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, isOfflin
                         <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1">
                             {key === 'p' ? 'Protein' : key === 'f' ? 'Fats' : 'Carbs'}
                         </label>
-                        <div className={`flex items-center border rounded-xl px-3 h-12 bg-gray-50 focus-within:ring-2 focus-within:ring-blue-500/10 transition-all ${validationError ? 'border-red-200 focus-within:border-red-500' : 'border-gray-200 focus-within:border-blue-500'}`}>
+                        <div className={`flex items-center border rounded-xl px-3 h-12 bg-gray-50 transition-all ${validationError ? 'border-red-200 focus-within:border-red-500' : 'border-gray-200 focus-within:border-blue-500'}`}>
                             <input 
                                 type="number" 
-                                className="flex-1 bg-transparent outline-none text-lg font-bold text-gray-900 min-w-0"
+                                disabled={isOffline}
+                                className="flex-1 bg-transparent outline-none text-lg font-bold text-gray-900 min-w-0 disabled:text-gray-400"
                                 value={macros[key as 'p'|'f'|'c']}
                                 onChange={(e) => handleMacroChange(key as 'p'|'f'|'c', e.target.value)}
                             />

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Settings } from 'lucide-react';
+import { SegmentedControl } from '../components/SegmentedControl';
 
 interface StatsScreenProps {
   onSettingsClick: () => void;
@@ -78,22 +79,16 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading, i
       </header>
 
       {/* 2) Period Selector */}
-      <div className="bg-gray-200/60 p-1 rounded-xl flex gap-1">
-          {[7, 14, 30].map((p) => (
-            <button 
-              key={p}
-              onClick={() => setPeriod(p as 7 | 14 | 30)}
-              disabled={isLoading}
-              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                  period === p 
-                  ? 'bg-white text-gray-900 shadow-sm' 
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {p} days
-            </button>
-          ))}
-      </div>
+      <SegmentedControl 
+        value={period}
+        onChange={(v) => setPeriod(v as 7 | 14 | 30)}
+        disabled={isLoading}
+        options={[
+            { label: '7 Days', value: 7 },
+            { label: '14 Days', value: 14 },
+            { label: '30 Days', value: 30 },
+        ]}
+      />
 
       {isLoading ? (
         // Loading Skeleton

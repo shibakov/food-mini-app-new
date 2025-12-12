@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Settings, Trash2, Plus, X, Minus } from 'lucide-react';
+import { Settings, Trash2, Plus, X, Minus, Info } from 'lucide-react';
 
 interface MainScreenProps {
   onAddClick: () => void;
@@ -107,15 +107,18 @@ const MainScreen: React.FC<MainScreenProps> = ({
   let statusTextColor = 'text-green-600';
   let progressBarColor = 'bg-green-500';
   let statusText = 'On track';
+  let insightText = 'Daily calorie intake is within the target range.';
 
   if (totalKcal > goalKcal + 50) {
       statusTextColor = 'text-orange-600';
       progressBarColor = 'bg-orange-500';
       statusText = 'Over limit';
+      insightText = 'Calories exceeded the upper tolerance range.';
   } else if (totalKcal < goalKcal - 400 && !isEmpty) {
       statusTextColor = 'text-blue-600';
       progressBarColor = 'bg-blue-500';
       statusText = 'Under target';
+      insightText = 'Calorie intake is below the daily target.';
   }
 
   // -- Handlers --
@@ -244,11 +247,12 @@ const MainScreen: React.FC<MainScreenProps> = ({
                 </div>
             </section>
 
-            {/* 3) Daily Comment Block - Neutral & Analytical */}
+            {/* 3) Daily Insight Block - Neutral & Analytical */}
             {!isEmpty && (
-                <div className="px-1">
-                    <p className="text-sm font-medium text-gray-600 leading-relaxed">
-                        Daily protein intake is slightly below the target.
+                <div className="bg-gray-50 rounded-lg border-l-[3px] border-gray-300 px-4 py-3 flex items-start gap-3">
+                    <Info size={16} className="text-gray-400 mt-0.5 flex-shrink-0" />
+                    <p className="text-sm font-medium text-gray-700 leading-snug">
+                        {insightText}
                     </p>
                 </div>
             )}
@@ -344,6 +348,9 @@ const MainScreen: React.FC<MainScreenProps> = ({
                 onClick={() => setSelectedMealId(null)}
             />
             <div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[2rem] z-[46] p-6 pb-10 max-w-md mx-auto shadow-2xl animate-[slideUp_0.3s_cubic-bezier(0.16,1,0.3,1)] max-h-[85vh] flex flex-col">
+                {/* GLOBAL RULE: Drag Handle */}
+                <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6" />
+
                 {/* Header */}
                 <div className="flex justify-between items-center mb-6">
                     <div>
@@ -353,7 +360,10 @@ const MainScreen: React.FC<MainScreenProps> = ({
                              <span className="text-sm font-bold text-blue-600">{selectedMeal.kcal} kcal</span>
                         </div>
                     </div>
-                    <button onClick={() => setSelectedMealId(null)} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200 transition-colors">
+                    <button 
+                        onClick={() => setSelectedMealId(null)} 
+                        className="p-2 bg-gray-100 rounded-full text-gray-500 hover:bg-gray-200 transition-colors"
+                    >
                         <X size={20} />
                     </button>
                 </div>
@@ -364,13 +374,14 @@ const MainScreen: React.FC<MainScreenProps> = ({
                          const isEditing = editingItemId === item.id;
                          return (
                             <div key={item.id} className={`flex justify-between items-center p-3 rounded-xl border transition-all ${isEditing ? 'border-blue-500 bg-blue-50/20' : 'border-gray-100'}`}>
-                                <div className="flex-1" onClick={() => setEditingItemId(item.id)}>
+                                <div className="flex-1" onClick={() => !isOffline && setEditingItemId(item.id)}>
                                     <div className="text-sm font-semibold text-gray-900">{item.name}</div>
                                     
                                     {isEditing ? (
                                         <div className="flex items-center gap-1 mt-1.5" onClick={e => e.stopPropagation()}>
                                             <button 
-                                                className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded text-gray-600 active:bg-gray-300"
+                                                disabled={isOffline}
+                                                className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded text-gray-600 active:bg-gray-300 disabled:opacity-50"
                                                 onClick={() => updateItemGrams(selectedMeal.id, item.id, item.grams - 5)}
                                             >
                                                 <Minus size={12} />
@@ -378,7 +389,8 @@ const MainScreen: React.FC<MainScreenProps> = ({
                                             <div className="relative">
                                                 <input 
                                                     ref={editInputRef}
-                                                    className="w-12 text-center font-bold text-gray-900 border-b border-blue-500 outline-none p-0 mx-1 bg-transparent text-sm"
+                                                    disabled={isOffline}
+                                                    className="w-12 text-center font-bold text-gray-900 border-b border-blue-500 outline-none p-0 mx-1 bg-transparent text-sm disabled:opacity-50"
                                                     type="number"
                                                     value={item.grams === 0 ? '' : item.grams}
                                                     onChange={(e) => updateItemGrams(selectedMeal.id, item.id, parseInt(e.target.value) || 0)}
@@ -387,7 +399,8 @@ const MainScreen: React.FC<MainScreenProps> = ({
                                                 />
                                             </div>
                                             <button 
-                                                className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded text-gray-600 active:bg-gray-300"
+                                                disabled={isOffline}
+                                                className="w-6 h-6 flex items-center justify-center bg-gray-200 rounded text-gray-600 active:bg-gray-300 disabled:opacity-50"
                                                 onClick={() => updateItemGrams(selectedMeal.id, item.id, item.grams + 5)}
                                             >
                                                 <Plus size={12} />
@@ -396,7 +409,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
                                     ) : (
                                         <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                                             <span className="bg-gray-100 px-1.5 rounded text-gray-600 font-medium">{item.grams}g</span>
-                                            <span className="text-[10px] text-gray-300">Tap to edit</span>
+                                            {!isOffline && <span className="text-[10px] text-gray-300">Tap to edit</span>}
                                         </div>
                                     )}
                                 </div>
@@ -412,7 +425,12 @@ const MainScreen: React.FC<MainScreenProps> = ({
                 {/* Footer Action */}
                 <button 
                     onClick={() => onEditMeal(selectedMeal.title)}
-                    className="w-full h-14 bg-gray-900 text-white rounded-2xl font-bold text-lg shadow-xl shadow-gray-900/10 flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+                    disabled={isOffline}
+                    className={`w-full h-14 rounded-2xl font-bold text-lg shadow-xl shadow-gray-900/10 flex items-center justify-center gap-2 transition-all ${
+                        isOffline 
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                        : 'bg-gray-900 text-white active:scale-[0.98]'
+                    }`}
                 >
                     <Plus size={20} />
                     <span>Add products</span>
