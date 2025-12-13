@@ -1,10 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Trash2, Plus, Minus, Sparkles } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { BottomSheet } from '../components/BottomSheet';
 import { PageHeader } from '../components/layout/PageHeader';
+import { DaySwipeLayer } from '../components/layout/DaySwipeLayer';
 import { api } from '../services/api';
 import { Meal } from '../types';
 
@@ -33,24 +34,52 @@ const MainScreen: React.FC<MainScreenProps> = ({
 }) => {
   const [meals, setMeals] = useState<Meal[]>([]);
   const [selectedMealId, setSelectedMealId] = useState<number | null>(null);
-  const [selectedDateIndex, setSelectedDateIndex] = useState(3);
+  const [selectedDateIndex, setSelectedDateIndex] = useState(3); // 3 is 'Today' in the generated range of 7 days
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
   const selectedMeal = meals.find(m => m.id === selectedMealId);
 
-  // Fetch Data on Mount
+  // Generate dates once (stable for session)
+  const calendarDates = useMemo(() => {
+    const dates = [];
+    const today = new Date();
+    for (let i = -3; i <= 3; i++) {
+        const d = new Date(today);
+        d.setDate(today.getDate() + i);
+        dates.push({ 
+            day: d.toLocaleDateString('en-US', { weekday: 'short' }), 
+            date: d.getDate(), 
+            isToday: i === 0, 
+            isFuture: i > 0, 
+            fullDate: d 
+        });
+    }
+    return dates;
+  }, []);
+
+  // Fetch Data when Date Changes or on Mount
   useEffect(() => {
     const fetchData = async () => {
-      if (isEmpty) {
-        setMeals([]);
-        return;
-      }
+      // Don't fetch if offline (unless cached logic existed, but for wireframe we skip)
+      if (isOffline && meals.length === 0) return; 
+
       setIsLoading(true);
       try {
-        const fetchedMeals = await api.meals.list(new Date());
+        // Simulate fetching for the specific date
+        const targetDate = calendarDates[selectedDateIndex].fullDate;
+        const fetchedMeals = await api.meals.list(targetDate);
         setMeals(fetchedMeals);
-        setIsEmpty(fetchedMeals.length === 0);
+        
+        // Only update global empty state if it's the current day or consistent logic
+        // For wireframe, we just show empty if the fetched list is empty
+        if (fetchedMeals.length === 0) {
+            // We only set the main Empty state if it's "today", otherwise just show empty list? 
+            // For simplicity in wireframe, we sync isEmpty
+             setIsEmpty(true);
+        } else {
+             setIsEmpty(false);
+        }
       } catch (err) {
         console.error("Failed to fetch meals", err);
       } finally {
@@ -58,23 +87,11 @@ const MainScreen: React.FC<MainScreenProps> = ({
       }
     };
     fetchData();
-  }, [isEmpty, setIsLoading, setIsEmpty]);
+  }, [selectedDateIndex, isOffline, setIsEmpty, setIsLoading, calendarDates]);
 
   useEffect(() => {
     if (editingItemId && editInputRef.current) editInputRef.current.select();
   }, [editingItemId]);
-
-  const generateDates = () => {
-    const dates = [];
-    const today = new Date();
-    for (let i = -3; i <= 3; i++) {
-        const d = new Date(today);
-        d.setDate(today.getDate() + i);
-        dates.push({ day: d.toLocaleDateString('en-US', { weekday: 'short' }), date: d.getDate(), isToday: i === 0, isFuture: i > 0, fullDate: d });
-    }
-    return dates;
-  };
-  const calendarDates = generateDates();
 
   const mealsToShow = isEmpty ? [] : meals;
   const totalKcal = mealsToShow.reduce((acc, curr) => acc + curr.kcal, 0);
@@ -113,8 +130,6 @@ const MainScreen: React.FC<MainScreenProps> = ({
         const newMealTotal = updatedItems.reduce((sum, i) => sum + i.kcal, 0);
         return { ...meal, items: updatedItems, kcal: newMealTotal };
     }));
-    
-    // In real app, call API here
   };
 
   const handleMealDelete = async (id: number) => {
@@ -125,6 +140,21 @@ const MainScreen: React.FC<MainScreenProps> = ({
         if (meals.length <= 1) setIsEmpty(true);
     } catch (e) {
         // Handle error
+    }
+  };
+
+  // Swipe Actions
+  const handleSwipeLeft = () => {
+    // Navigate to Next Day (if available)
+    if (selectedDateIndex < calendarDates.length - 1) {
+        setSelectedDateIndex(prev => prev + 1);
+    }
+  };
+
+  const handleSwipeRight = () => {
+    // Navigate to Previous Day (if available)
+    if (selectedDateIndex > 0) {
+        setSelectedDateIndex(prev => prev - 1);
     }
   };
 
@@ -157,8 +187,12 @@ const MainScreen: React.FC<MainScreenProps> = ({
   );
 
   return (
-    <div className="flex flex-col min-h-full bg-gray-50 font-sans text-gray-900">
-      
+    <DaySwipeLayer 
+        onSwipeLeft={handleSwipeLeft} 
+        onSwipeRight={handleSwipeRight}
+        disabled={!!selectedMeal} // Disable swipe if the details sheet is open
+        className="flex flex-col min-h-full bg-gray-50 font-sans text-gray-900"
+    >
       <PageHeader 
         title={calendarDates[selectedDateIndex].isToday ? 'Today' : calendarDates[selectedDateIndex].fullDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
         subtitle="Daily Overview"
@@ -167,7 +201,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
       />
 
       {/* Content Area */}
-      <div className="p-4 space-y-5 pb-28 pt-3">
+      <div className="p-4 space-y-5 pb-28 pt-3 flex-1">
         
         {isLoading && (
           <div className="space-y-4 animate-pulse">
@@ -284,7 +318,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
                                   </div>
                                 </Card>
 
-                                {/* Swipe Action */}
+                                {/* Swipe Action - This swipe is handled by CSS overflow, ignored by DaySwipeLayer */}
                                 <div 
                                   className="w-[5rem] flex-shrink-0 snap-center bg-rose-50 flex flex-col items-center justify-center ml-[-1rem] pl-4 rounded-r-2xl active:bg-rose-100 transition-colors cursor-pointer z-0 group"
                                   onClick={() => handleMealDelete(meal.id)}
@@ -389,7 +423,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
              </div>
          )}
       </BottomSheet>
-    </div>
+    </DaySwipeLayer>
   );
 };
 
