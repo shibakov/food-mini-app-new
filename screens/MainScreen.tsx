@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Minus, Plus } from 'lucide-react';
-import { Input } from '../components/Input';
+import { Minus, Plus, Edit2 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BottomSheet } from '../components/BottomSheet';
 import { PageHeader } from '../components/layout/PageHeader';
 import { DaySwipeLayer } from '../components/layout/DaySwipeLayer';
 import { DailyView } from '../components/DailyView';
+import { UniversalPicker } from '../components/UniversalPicker';
+import { ValueTrigger } from '../components/ValueTrigger';
 import { api } from '../services/api';
 import { Meal } from '../types';
 
@@ -35,11 +36,23 @@ const MainScreen: React.FC<MainScreenProps> = ({
   // Data State
   const [meals, setMeals] = useState<Meal[]>([]);
   const [selectedMealId, setSelectedMealId] = useState<number | null>(null);
-  const [selectedDateIndex, setSelectedDateIndex] = useState(3); // 3 is 'Today'
+  const [selectedDateIndex, setSelectedDateIndex] = useState(3);
   
-  // Edit Meal State
-  const [editingItemId, setEditingItemId] = useState<number | null>(null);
-  const editInputRef = useRef<HTMLInputElement>(null);
+  // Picker State
+  const [pickerConfig, setPickerConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    value: number;
+    min: number;
+    max: number;
+    step: number;
+    unit: string;
+    onConfirm: (val: number) => void;
+  }>({ isOpen: false, title: '', value: 0, min: 0, max: 0, step: 1, unit: '', onConfirm: () => {} });
+
+  const openPicker = (title: string, val: number, min: number, max: number, step: number, unit: string, onConfirm: (v: number) => void) => {
+      setPickerConfig({ isOpen: true, title, value: val, min, max, step, unit, onConfirm });
+  };
   
   // Transition State
   const currentViewRef = useRef<HTMLDivElement>(null);
@@ -144,9 +157,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
 
   const handleSwipeProgress = (dx: number) => {
     if (!currentViewRef.current) return;
-
     currentViewRef.current.style.transform = `translateX(${dx}px)`;
-
     const direction = dx < 0 ? 1 : -1; 
     const nextIndex = selectedDateIndex + direction;
 
@@ -155,14 +166,9 @@ const MainScreen: React.FC<MainScreenProps> = ({
        if (incomingViewRef.current) incomingViewRef.current.style.opacity = '0';
        return;
     }
-
     setIncomingDateIndex(nextIndex);
-
     if (incomingViewRef.current) {
         incomingViewRef.current.style.opacity = '1';
-        // Place incoming view on the left or right side based on direction
-        // If swiping Left (dx < 0), next day comes from Right (100%)
-        // If swiping Right (dx > 0), prev day comes from Left (-100%)
         const startX = direction === 1 ? '100%' : '-100%';
         incomingViewRef.current.style.transform = `translateX(calc(${startX} + ${dx}px))`;
     }
@@ -173,50 +179,39 @@ const MainScreen: React.FC<MainScreenProps> = ({
         setIsAnimating(false);
         return;
     }
-
     const transition = 'transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
     currentViewRef.current.style.transition = transition;
-    
     if (incomingViewRef.current) incomingViewRef.current.style.transition = transition;
-
     const targetIndex = incomingDateIndex !== null ? incomingDateIndex : selectedDateIndex;
     const isOutOfBounds = targetIndex < 0 || targetIndex >= calendarDates.length || (calendarDates[targetIndex].isFuture);
     
     if (shouldSwitch && !isOutOfBounds && incomingDateIndex !== null) {
-        // Complete Transition
         const exitX = direction === 'left' ? '-100%' : '100%';
         currentViewRef.current.style.transform = `translateX(${exitX})`;
-        
         if (incomingViewRef.current) {
            incomingViewRef.current.style.transform = `translateX(0)`;
         }
-
         setTimeout(() => {
             setSelectedDateIndex(targetIndex);
             setIsAnimating(false);
             setIncomingDateIndex(null);
-            
             if (currentViewRef.current) {
                 currentViewRef.current.style.transition = 'none';
                 currentViewRef.current.style.transform = '';
             }
         }, 300);
     } else {
-        // Snap Back
         currentViewRef.current.style.transform = `translateX(0)`;
-        
         if (incomingViewRef.current) {
            const resetX = direction === 'left' ? '100%' : '-100%';
            incomingViewRef.current.style.transform = `translateX(${resetX})`;
         }
-
         setTimeout(() => {
             setIsAnimating(false);
             setIncomingDateIndex(null);
         }, 300);
     }
   };
-
 
   const DateCarousel = (
     <div className="flex space-x-2 overflow-x-auto no-scrollbar snap-x pt-2">
@@ -246,7 +241,6 @@ const MainScreen: React.FC<MainScreenProps> = ({
   );
 
   return (
-    // Fixed height h-full is critical here for absolute positioning children to work
     <div className="flex flex-col h-full bg-gray-50 font-sans text-gray-900 overflow-hidden">
       <PageHeader 
         title={calendarDates[selectedDateIndex].isToday ? 'Today' : calendarDates[selectedDateIndex].fullDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -264,8 +258,6 @@ const MainScreen: React.FC<MainScreenProps> = ({
         disabled={!!selectedMeal}
       >
         <div className="relative w-full h-full">
-            
-            {/* CURRENT VIEW */}
             <div 
                 ref={currentViewRef}
                 className="absolute inset-0 overflow-y-auto no-scrollbar w-full h-full bg-gray-50"
@@ -288,16 +280,11 @@ const MainScreen: React.FC<MainScreenProps> = ({
                     onMealClick={setSelectedMealId}
                  />
             </div>
-
-            {/* INCOMING VIEW */}
             {isAnimating && (
                  <div 
                     ref={incomingViewRef}
                     className="absolute inset-0 overflow-y-auto no-scrollbar w-full h-full bg-gray-50 z-10"
-                    style={{ 
-                        transform: 'translateX(100%)', // Default off-screen
-                        willChange: 'transform'
-                    }} 
+                    style={{ transform: 'translateX(100%)', willChange: 'transform' }} 
                 >
                     <DailyView 
                         isLoading={true} 
@@ -343,48 +330,19 @@ const MainScreen: React.FC<MainScreenProps> = ({
          {selectedMeal && (
              <div className="space-y-2">
                 {selectedMeal.items.map((item) => {
-                     const isEditing = editingItemId === item.id;
                      return (
-                        <div key={item.id} className={`flex justify-between items-center p-4 rounded-2xl border transition-all duration-200 ${isEditing ? 'border-blue-500 bg-blue-50/10' : 'border-gray-50 bg-white'}`}>
-                            <div className="flex-1" onClick={() => !isOffline && setEditingItemId(item.id)}>
+                        <div key={item.id} className="flex justify-between items-center p-4 rounded-2xl border border-gray-50 bg-white">
+                            <div className="flex-1">
                                 <div className="text-sm font-semibold text-gray-900">{item.name}</div>
-                                
-                                {isEditing ? (
-                                    <div className="flex items-center gap-1 mt-2" onClick={e => e.stopPropagation()}>
-                                        <button 
-                                            disabled={isOffline}
-                                            className="w-8 h-8 flex items-center justify-center bg-white border border-gray-200 rounded-lg text-gray-600 active:bg-gray-100 disabled:opacity-50 transition-colors shadow-sm"
-                                            onClick={() => updateItemGrams(selectedMeal.id, item.id, item.grams - 5)}
-                                        >
-                                            <Minus size={14} strokeWidth={2.5} />
-                                        </button>
-                                        <div className="relative mx-1">
-                                            <Input 
-                                                variant="inline"
-                                                ref={editInputRef}
-                                                className="w-16"
-                                                type="number"
-                                                disabled={isOffline}
-                                                value={item.grams === 0 ? '' : item.grams}
-                                                onChange={(e) => updateItemGrams(selectedMeal.id, item.id, parseInt(e.target.value) || 0)}
-                                                onBlur={() => setEditingItemId(null)}
-                                                onKeyDown={(e) => e.key === 'Enter' && setEditingItemId(null)}
-                                            />
-                                        </div>
-                                        <button 
-                                            disabled={isOffline}
-                                            className="w-8 h-8 flex items-center justify-center bg-white border border-gray-200 rounded-lg text-gray-600 active:bg-gray-100 disabled:opacity-50 transition-colors shadow-sm"
-                                            onClick={() => updateItemGrams(selectedMeal.id, item.id, item.grams + 5)}
-                                        >
-                                            <Plus size={14} strokeWidth={2.5} />
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="text-xs text-gray-500 font-medium flex items-center gap-2 mt-1">
-                                        <span className="bg-gray-50 px-2 py-0.5 rounded text-gray-600 font-semibold text-[10px] uppercase tracking-wide">{item.grams}g</span>
-                                        {!isOffline && <span className="text-[10px] text-gray-300 font-medium">Edit</span>}
-                                    </div>
-                                )}
+                                <div className="mt-1">
+                                    <ValueTrigger 
+                                        variant="inline"
+                                        value={item.grams}
+                                        unit="g"
+                                        onClick={() => openPicker(item.name, item.grams, 0, 5000, 1, 'g', (v) => updateItemGrams(selectedMeal.id, item.id, v))}
+                                        disabled={isOffline}
+                                    />
+                                </div>
                             </div>
                             <div className="flex flex-col items-end">
                                  <span className="text-sm font-bold text-gray-900">{item.kcal}</span>
@@ -396,6 +354,18 @@ const MainScreen: React.FC<MainScreenProps> = ({
              </div>
          )}
       </BottomSheet>
+
+      <UniversalPicker 
+        isOpen={pickerConfig.isOpen}
+        onClose={() => setPickerConfig(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={pickerConfig.onConfirm}
+        title={pickerConfig.title}
+        value={pickerConfig.value}
+        min={pickerConfig.min}
+        max={pickerConfig.max}
+        step={pickerConfig.step}
+        unit={pickerConfig.unit}
+      />
     </div>
   );
 };
