@@ -5,7 +5,7 @@ import { Card } from '../components/Card';
 import { Stepper } from '../components/Stepper';
 import { Button } from '../components/Button';
 import { BottomSheet } from '../components/BottomSheet';
-import { api } from '../services/api';
+import { api } from '../../services/api';
 
 interface SettingsSheetProps {
   isOpen: boolean;
