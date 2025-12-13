@@ -1,0 +1,20 @@
+# Этап 1: Сборка
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# Этап 2: Запуск (Production)
+FROM node:20-alpine
+WORKDIR /app
+# Устанавливаем простой статический сервер
+RUN npm install -g serve
+# Копируем только собранные файлы из этапа сборки
+COPY --from=builder /app/dist ./dist
+
+# Railway автоматически предоставляет переменную PORT
+ENV PORT=3000
+# Запускаем сервер, слушающий 0.0.0.0 на нужном порту
+CMD ["sh", "-c", "serve -s dist -l tcp://0.0.0.0:${PORT}"]
