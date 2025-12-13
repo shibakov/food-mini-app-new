@@ -15,10 +15,15 @@ interface UniversalPickerProps {
 }
 
 const ITEM_HEIGHT = 50;
-// Physics Constants
-const FRICTION = 0.94; // Heavier inertia (0.99 is light/slippery)
-const SNAP_THRESHOLD = 0.5; // Pixel velocity below which we snap
-const SNAP_STRENGTH = 0.2; // Spring force for snapping
+
+// -- PHYSICS CONSTANTS --
+const FRICTION = 0.94;             // Base inertia (Heavy feel)
+const SNAP_THRESHOLD = 4.0;        // Velocity (px/frame) below which snapping engages (approx 240px/s)
+const SNAP_STRENGTH = 0.06;        // Gentle spring force for "Soft Landing"
+const SNAP_DAMPING = 0.92;         // Extra damping during snap (Multiplies with FRICTION)
+const BOUNDS_SNAP_STRENGTH = 0.2;  // Strong spring for rubber-banding
+const BOUNDS_DAMPING = 0.6;        // Heavy damping for rubber-banding to prevent oscillation
+const STOP_THRESHOLD = 0.1;        // Precision to consider stopped
 
 export const UniversalPicker: React.FC<UniversalPickerProps> = ({
   isOpen,
@@ -44,8 +49,7 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
     v: 0,
     isDragging: false,
     lastY: 0,
-    lastT: 0,
-    isBounds: false
+    lastT: 0
   });
   const rafRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -64,8 +68,7 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
         v: 0,
         isDragging: false,
         lastY: 0,
-        lastT: 0,
-        isBounds: false
+        lastT: 0
       };
       setMode('wheel');
       setManualInputValue('');
@@ -94,42 +97,60 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
         const p = physics.current;
         
         if (!p.isDragging) {
-            // 1. Inertia
-            p.v *= FRICTION;
-            p.y += p.v;
-
-            // 2. Bounds & Rubber Banding
-            // We allow overscroll but spring back
+            // 1. Determine Target (Bounds or Snap)
             let target = null;
-            if (p.y < 0) target = 0;
-            else if (p.y > maxScroll) target = maxScroll;
+            let strength = 0;
+            let damping = 1;
 
-            // 3. Snapping
-            // If dragging stopped, velocity is low, and we are within bounds -> Snap to item
-            if (target === null && Math.abs(p.v) < SNAP_THRESHOLD) {
-                const rawIdx = p.y / ITEM_HEIGHT;
-                const snapIdx = Math.round(rawIdx);
-                target = snapIdx * ITEM_HEIGHT;
+            if (p.y < 0) {
+                target = 0;
+                strength = BOUNDS_SNAP_STRENGTH;
+                damping = BOUNDS_DAMPING;
+            } else if (p.y > maxScroll) {
+                target = maxScroll;
+                strength = BOUNDS_SNAP_STRENGTH;
+                damping = BOUNDS_DAMPING;
+            } else if (Math.abs(p.v) < SNAP_THRESHOLD) {
+                // In-bounds "Soft Landing"
+                // Engage magnetic snap when velocity is low
+                const nearest = Math.round(p.y / ITEM_HEIGHT) * ITEM_HEIGHT;
+                target = nearest;
+                strength = SNAP_STRENGTH;
+                damping = SNAP_DAMPING;
             }
 
-            // Apply force towards target if one exists
+            // 2. Apply Forces
             if (target !== null) {
                 const dist = target - p.y;
-                // Strong spring near target, weaker far away? No, constant spring is fine.
-                p.y += dist * SNAP_STRENGTH;
-                // Dampen velocity heavily when snapping/bounding to prevent oscillation
-                p.v *= 0.5;
-
-                // Stop if practically there
-                if (Math.abs(dist) < 0.1 && Math.abs(p.v) < 0.1) {
+                
+                // Stop condition
+                if (Math.abs(dist) < STOP_THRESHOLD && Math.abs(p.v) < STOP_THRESHOLD) {
                     p.y = target;
                     p.v = 0;
+                } else {
+                    // Spring Physics: F = -kx
+                    // We apply force to velocity, then damp
+                    p.v += dist * strength;
+                    
+                    // Special damping logic:
+                    // If bounding, we override friction significantly.
+                    // If snapping, we gently increase damping on top of base friction.
+                    if (strength === BOUNDS_SNAP_STRENGTH) {
+                        p.v *= damping;
+                    } else {
+                        p.v *= FRICTION * damping; 
+                    }
                 }
+            } else {
+                // Free Inertia
+                p.v *= FRICTION;
             }
 
-            // Update React state for rendering
-            // Optimize: only if changed > 0.1px
-            // Note: We access the REF value inside setScrollPos updater to ensure latest
+            // 3. Update Position
+            p.y += p.v;
+
+            // 4. Render
+            // Only update state if moved significantly to reduce react overhead
             setScrollPos(prev => {
                 if (Math.abs(prev - p.y) < 0.1) return prev;
                 return p.y;
@@ -160,9 +181,7 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
     const clientY = e.touches[0].clientY;
     const dy = clientY - p.lastY; 
     
-    // Apply delta to position
-    // Drag UP (negative dy) -> Scroll INCREASES (move down the list)
-    // So we subtract dy.
+    // Apply delta to position (Inverted: Drag up = Scroll down/increase y)
     // Resistance at bounds (rubber band)
     if (p.y < 0 || p.y > maxScroll) {
         p.y -= dy * 0.4; // 60% resistance
@@ -171,21 +190,16 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
     }
 
     // Velocity tracking
-    // We use a simple moving average or just raw delta for "heavy" feel
-    // A heavy wheel doesn't accelerate instantly.
     p.v = -dy; 
 
     p.lastY = clientY;
     p.lastT = Date.now();
     
-    // Direct visual update to minimize lag
     setScrollPos(p.y);
   };
 
   const handleTouchEnd = () => {
     physics.current.isDragging = false;
-    // Velocity is already set in Move.
-    // The Loop will pick it up next frame.
   };
 
   // --- RENDER HELPERS ---
@@ -206,14 +220,10 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
         const distance = i - currentIndex;
         
         // 3D Transform Logic
-        // Angle: 18 deg per item
         const angle = distance * 18;
-        // Offset: Visual position relative to container center
         const offset = distance * ITEM_HEIGHT;
 
-        // Visual Weight:
-        // Center = 1.0 scale, 1.0 opacity
-        // Edges fade fast
+        // Visual Weight
         const absDist = Math.abs(distance);
         const opacity = Math.max(0.15, 1 - Math.pow(absDist * 0.3, 2));
         const scale = Math.max(0.8, 1 - Math.pow(absDist * 0.1, 2)); 
@@ -261,7 +271,6 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
   const confirmValue = () => {
       if (mode === 'manual') handleManualSave();
       
-      // Calculate current value from physics position
       const idx = Math.round(physics.current.y / ITEM_HEIGHT);
       const val = min + (idx * step);
       const clamped = Math.max(min, Math.min(max, val));
@@ -307,7 +316,6 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
             {mode === 'wheel' ? (
                 <div 
                     className="relative h-[260px] w-full select-none overflow-hidden cursor-grab active:cursor-grabbing"
-                    // Touch Action None prevents browser scrolling - CRITICAL for axis locking
                     style={{ touchAction: 'none' }} 
                     ref={containerRef}
                     onTouchStart={handleTouchStart}
@@ -350,11 +358,6 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
                              {renderWheelItems()}
                          </div>
                     </div>
-
-                    {/* Tap Center to Edit (Optional, might interfere with drag if not careful, z-index lower than touch handler) */}
-                    {/* We removed the explicit tap area; user can tap keyboard icon. 
-                        If we want tap-to-edit on value, we need to detect tap vs drag.
-                        For now, keeping it simple to ensure physics is robust. */}
                 </div>
             ) : (
                 <div className="h-[260px] flex flex-col items-center justify-center p-6 bg-gray-50/30">
