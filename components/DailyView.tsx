@@ -40,7 +40,7 @@ export const DailyView: React.FC<DailyViewProps> = ({
 }) => {
   if (isLoading) {
     return (
-      <div className="space-y-4 animate-pulse">
+      <div className="space-y-4 animate-pulse pt-4 px-4">
         <div className="bg-white rounded-2xl h-56 w-full"></div>
         <div className="h-24 bg-white rounded-2xl w-full"></div>
         <div className="h-24 bg-white rounded-2xl w-full"></div>
@@ -49,7 +49,8 @@ export const DailyView: React.FC<DailyViewProps> = ({
   }
 
   return (
-    <div className="space-y-5 pb-28 pt-3 min-h-full">
+    // Added bg-gray-50 to ensure no transparency during slide transitions
+    <div className="space-y-5 pb-28 pt-3 min-h-full px-4 bg-gray-50">
       {/* 2) Summary Block */}
       <Card variant="regular" className="pt-6 pb-6">
           <div className="flex justify-between items-start mb-5">

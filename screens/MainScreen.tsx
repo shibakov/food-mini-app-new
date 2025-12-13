@@ -42,10 +42,8 @@ const MainScreen: React.FC<MainScreenProps> = ({
   const editInputRef = useRef<HTMLInputElement>(null);
   
   // Transition State
-  // We use refs for the DOM elements to animate performantly during drag
   const currentViewRef = useRef<HTMLDivElement>(null);
   const incomingViewRef = useRef<HTMLDivElement>(null);
-  // We track the "next" index being dragged into to show loading state
   const [incomingDateIndex, setIncomingDateIndex] = useState<number | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
@@ -139,7 +137,6 @@ const MainScreen: React.FC<MainScreenProps> = ({
   // --- TRANSITION LOGIC ---
 
   const handleSwipeStart = () => {
-    // Remove transition for instant drag response
     if (currentViewRef.current) currentViewRef.current.style.transition = 'none';
     if (incomingViewRef.current) incomingViewRef.current.style.transition = 'none';
     setIsAnimating(true);
@@ -148,18 +145,12 @@ const MainScreen: React.FC<MainScreenProps> = ({
   const handleSwipeProgress = (dx: number) => {
     if (!currentViewRef.current) return;
 
-    // 1. Move Current View
     currentViewRef.current.style.transform = `translateX(${dx}px)`;
 
-    // 2. Determine Incoming View Position
-    // If dx < 0 (swipe left), we are dragging in the NEXT day (from Right)
-    // If dx > 0 (swipe right), we are dragging in the PREV day (from Left)
-    const direction = dx < 0 ? 1 : -1; // 1 = Next, -1 = Prev
+    const direction = dx < 0 ? 1 : -1; 
     const nextIndex = selectedDateIndex + direction;
 
-    // Safety check for bounds
     if (nextIndex < 0 || nextIndex >= calendarDates.length || (calendarDates[nextIndex].isFuture)) {
-       // Resistance effect if out of bounds
        currentViewRef.current.style.transform = `translateX(${dx * 0.3}px)`;
        if (incomingViewRef.current) incomingViewRef.current.style.opacity = '0';
        return;
@@ -167,56 +158,57 @@ const MainScreen: React.FC<MainScreenProps> = ({
 
     setIncomingDateIndex(nextIndex);
 
-    // Position Incoming View
     if (incomingViewRef.current) {
         incomingViewRef.current.style.opacity = '1';
+        // Place incoming view on the left or right side based on direction
+        // If swiping Left (dx < 0), next day comes from Right (100%)
+        // If swiping Right (dx > 0), prev day comes from Left (-100%)
         const startX = direction === 1 ? '100%' : '-100%';
-        // The incoming view sits next to the current view
-        // translateX(100% + dx) if coming from right
-        // translateX(-100% + dx) if coming from left
-        // Note: Using pixel offset for dx, but % for initial placement
         incomingViewRef.current.style.transform = `translateX(calc(${startX} + ${dx}px))`;
     }
   };
 
   const handleSwipeEnd = (shouldSwitch: boolean, direction: 'left' | 'right') => {
-    if (!currentViewRef.current || !incomingViewRef.current) {
+    if (!currentViewRef.current) {
         setIsAnimating(false);
         return;
     }
 
-    // Restore transition for the snap animation
     const transition = 'transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
     currentViewRef.current.style.transition = transition;
-    incomingViewRef.current.style.transition = transition;
+    
+    if (incomingViewRef.current) incomingViewRef.current.style.transition = transition;
 
-    // Determine target index based on drag, or default to current
     const targetIndex = incomingDateIndex !== null ? incomingDateIndex : selectedDateIndex;
     const isOutOfBounds = targetIndex < 0 || targetIndex >= calendarDates.length || (calendarDates[targetIndex].isFuture);
     
-    // Switch Condition: User dragged far enough AND target is valid
     if (shouldSwitch && !isOutOfBounds && incomingDateIndex !== null) {
-        // Slide Out Complete
+        // Complete Transition
         const exitX = direction === 'left' ? '-100%' : '100%';
         currentViewRef.current.style.transform = `translateX(${exitX})`;
-        incomingViewRef.current.style.transform = `translateX(0)`;
+        
+        if (incomingViewRef.current) {
+           incomingViewRef.current.style.transform = `translateX(0)`;
+        }
 
-        // Wait for animation to finish, then commit state
         setTimeout(() => {
             setSelectedDateIndex(targetIndex);
             setIsAnimating(false);
             setIncomingDateIndex(null);
-            // Reset styles for next time
+            
             if (currentViewRef.current) {
                 currentViewRef.current.style.transition = 'none';
                 currentViewRef.current.style.transform = '';
             }
         }, 300);
     } else {
-        // Snap Back (Cancel)
+        // Snap Back
         currentViewRef.current.style.transform = `translateX(0)`;
-        const resetX = direction === 'left' ? '100%' : '-100%'; // Send incoming back to where it came from
-        incomingViewRef.current.style.transform = `translateX(${resetX})`;
+        
+        if (incomingViewRef.current) {
+           const resetX = direction === 'left' ? '100%' : '-100%';
+           incomingViewRef.current.style.transform = `translateX(${resetX})`;
+        }
 
         setTimeout(() => {
             setIsAnimating(false);
@@ -226,7 +218,6 @@ const MainScreen: React.FC<MainScreenProps> = ({
   };
 
 
-  // Header Carousel
   const DateCarousel = (
     <div className="flex space-x-2 overflow-x-auto no-scrollbar snap-x pt-2">
       {calendarDates.map((item, i) => {
@@ -255,7 +246,8 @@ const MainScreen: React.FC<MainScreenProps> = ({
   );
 
   return (
-    <div className="flex flex-col min-h-full bg-gray-50 font-sans text-gray-900 overflow-hidden">
+    // Fixed height h-full is critical here for absolute positioning children to work
+    <div className="flex flex-col h-full bg-gray-50 font-sans text-gray-900 overflow-hidden">
       <PageHeader 
         title={calendarDates[selectedDateIndex].isToday ? 'Today' : calendarDates[selectedDateIndex].fullDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
         subtitle="Daily Overview"
@@ -271,13 +263,12 @@ const MainScreen: React.FC<MainScreenProps> = ({
         onSwipeEnd={handleSwipeEnd}
         disabled={!!selectedMeal}
       >
-        <div className="relative w-full h-full p-4">
+        <div className="relative w-full h-full">
             
             {/* CURRENT VIEW */}
             <div 
                 ref={currentViewRef}
-                className="absolute inset-0 p-4 pt-3 overflow-y-auto no-scrollbar w-full h-full"
-                // Using hardware acceleration hint
+                className="absolute inset-0 overflow-y-auto no-scrollbar w-full h-full bg-gray-50"
                 style={{ willChange: 'transform' }} 
             >
                  <DailyView 
@@ -298,19 +289,18 @@ const MainScreen: React.FC<MainScreenProps> = ({
                  />
             </div>
 
-            {/* INCOMING VIEW (Visible during drag) */}
+            {/* INCOMING VIEW */}
             {isAnimating && (
                  <div 
                     ref={incomingViewRef}
-                    className="absolute inset-0 p-4 pt-3 overflow-y-auto no-scrollbar w-full h-full"
+                    className="absolute inset-0 overflow-y-auto no-scrollbar w-full h-full bg-gray-50 z-10"
                     style={{ 
-                        transform: 'translateX(100%)', // Default off-screen right
+                        transform: 'translateX(100%)', // Default off-screen
                         willChange: 'transform'
                     }} 
                 >
-                    {/* Render Loading State for the incoming day */}
                     <DailyView 
-                        isLoading={true} // Always loading during swipe until commit
+                        isLoading={true} 
                         isEmpty={true}
                         isOffline={isOffline}
                         meals={[]}

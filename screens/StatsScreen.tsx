@@ -57,7 +57,8 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading, i
   );
 
   return (
-    <div className="flex flex-col min-h-full bg-gray-50 font-sans text-gray-900">
+    // Added overflow-y-auto no-scrollbar to root container
+    <div className="flex flex-col h-full overflow-y-auto no-scrollbar bg-gray-50 font-sans text-gray-900">
       
       <PageHeader 
         title="Statistics"

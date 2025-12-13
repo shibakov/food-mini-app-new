@@ -98,8 +98,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto no-scrollbar pb-28 relative bg-gray-50">
+      {/* Main Content Area - Fixed: Removed overflow-y-auto to allow screens to handle it */}
+      <main className="flex-1 relative overflow-hidden bg-gray-50">
         {renderContent()}
       </main>
 
