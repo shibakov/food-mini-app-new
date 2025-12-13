@@ -2,11 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { AlertCircle, Check } from 'lucide-react';
 import { SegmentedControl } from '../SegmentedControl';
 import { Card } from '../Card';
-import { Input } from '../Input';
+import { Stepper } from '../Stepper';
 import { Button } from '../Button';
 import { BottomSheet } from '../BottomSheet';
 import { api } from '../../services/api';
-import { AppSettings } from '../../types';
 
 interface SettingsSheetProps {
   isOpen: boolean;
@@ -80,13 +79,14 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
           
           <Card variant="regular" className="space-y-4">
             <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block pl-1">Daily Calorie Target</label>
-            <Input 
-                type="number" 
-                unit="kcal" 
-                disabled={isOffline} 
-                value={calorieTarget} 
-                onChange={(e) => setCalorieTarget(e.target.value)} 
-                placeholder="2000" 
+            <Stepper 
+                value={parseInt(calorieTarget) || 0}
+                onChange={(v) => setCalorieTarget(v.toString())}
+                step={50}
+                min={500}
+                max={10000}
+                unit="kcal"
+                disabled={isOffline}
             />
           </Card>
 
@@ -141,6 +141,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
                 value={macroMode} 
                 onChange={(v) => { 
                     setMacroMode(v as 'percent' | 'grams'); 
+                    // Reset defaults when switching modes to prevent weird values
                     setMacros(v === 'percent' ? { p: '30', f: '35', c: '35' } : { p: '150', f: '60', c: '200' }); 
                 }} 
                 disabled={isOffline} 
@@ -156,14 +157,15 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
                         <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1 block text-center">
                             {key === 'p' ? 'Protein' : key === 'f' ? 'Fats' : 'Carbs'}
                         </label>
-                        <Input 
-                            type="number" 
-                            disabled={isOffline} 
-                            unit={macroMode === 'percent' ? '%' : 'g'} 
-                            className="text-center"
-                            error={!!validationError} 
-                            value={macros[key as 'p'|'f'|'c']} 
-                            onChange={(e) => handleMacroChange(key as 'p'|'f'|'c', e.target.value)} 
+                        <Stepper
+                            value={parseInt(macros[key as 'p'|'f'|'c']) || 0}
+                            onChange={(v) => handleMacroChange(key as 'p'|'f'|'c', v.toString())}
+                            disabled={isOffline}
+                            unit={macroMode === 'percent' ? '%' : 'g'}
+                            step={macroMode === 'percent' ? 1 : 5}
+                            min={0}
+                            max={macroMode === 'percent' ? 100 : 1000}
+                            error={!!validationError}
                         />
                     </div>
                 ))}
@@ -187,7 +189,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
             )}
             
             {validationError && (
-                <div className="flex items-start gap-3 text-rose-600 bg-rose-50 p-4 rounded-xl border border-rose-100">
+                <div className="flex items-start gap-3 text-rose-600 bg-rose-50 p-4 rounded-xl border border-rose-100 animate-[fadeIn_0.2s_ease-out]">
                     <AlertCircle size={18} className="mt-0.5 flex-shrink-0" />
                     <span className="text-xs font-semibold leading-relaxed">{validationError}</span>
                 </div>
