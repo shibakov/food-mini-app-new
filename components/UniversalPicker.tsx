@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
 import { Keyboard, X } from 'lucide-react';
 import { Button } from './Button';
 
@@ -15,6 +15,10 @@ interface UniversalPickerProps {
 }
 
 const ITEM_HEIGHT = 50;
+// Physics Constants
+const FRICTION = 0.94; // Heavier inertia (0.99 is light/slippery)
+const SNAP_THRESHOLD = 0.5; // Pixel velocity below which we snap
+const SNAP_STRENGTH = 0.2; // Spring force for snapping
 
 export const UniversalPicker: React.FC<UniversalPickerProps> = ({
   isOpen,
@@ -27,119 +31,213 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
   step = 1,
   unit = ''
 }) => {
-  const [currentValue, setCurrentValue] = useState(initialValue);
   const [mode, setMode] = useState<'wheel' | 'manual'>('wheel');
   const [manualInputValue, setManualInputValue] = useState('');
   
-  // Wheel State
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const isInitializing = useRef(true);
-  const scrollTimeout = useRef<number | null>(null);
+  // -- PHYSICS STATE --
+  // We track pixels (y). 0y = min value.
+  const [scrollPos, setScrollPos] = useState(0);
   
-  // Reset on open
-  useEffect(() => {
+  // Refs for loop
+  const physics = useRef({
+    y: 0,
+    v: 0,
+    isDragging: false,
+    lastY: 0,
+    lastT: 0,
+    isBounds: false
+  });
+  const rafRef = useRef<number>(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Constants derived from props
+  const totalSteps = Math.floor((max - min) / step) + 1;
+  const maxScroll = (totalSteps - 1) * ITEM_HEIGHT;
+
+  // Initialize
+  useLayoutEffect(() => {
     if (isOpen) {
-      setCurrentValue(initialValue);
+      const startPos = ((initialValue - min) / step) * ITEM_HEIGHT;
+      setScrollPos(startPos);
+      physics.current = {
+        y: startPos,
+        v: 0,
+        isDragging: false,
+        lastY: 0,
+        lastT: 0,
+        isBounds: false
+      };
       setMode('wheel');
       setManualInputValue('');
-      isInitializing.current = true;
     }
-  }, [isOpen, initialValue]);
+  }, [isOpen, initialValue, min, step]);
 
-  // Sync manual input when switching modes
+  // Sync manual input
   useEffect(() => {
     if (mode === 'manual') {
-      setManualInputValue(currentValue.toString());
+       // Calculate current integer value from float scrollPos
+       const idx = Math.round(physics.current.y / ITEM_HEIGHT);
+       const val = min + (idx * step);
+       const clamped = Math.max(min, Math.min(max, val));
+       setManualInputValue(clamped.toString());
     }
-  }, [mode, currentValue]);
+  }, [mode]);
 
-  // --- WHEEL LOGIC ---
-  const totalSteps = Math.floor((max - min) / step) + 1;
-  
-  const handleScroll = useCallback(() => {
-    if (!scrollRef.current) return;
-    
-    // Ignore scroll events during initialization to prevent jumpiness or zero-reset
-    if (isInitializing.current) return;
-    
-    // Calculate index from scroll position
-    const scrollTop = scrollRef.current.scrollTop;
-    const index = Math.round(scrollTop / ITEM_HEIGHT);
-    const newValue = min + (index * step);
-    
-    // Clamp
-    const clamped = Math.max(min, Math.min(max, newValue));
-    
-    // Only update state if changed to prevent thrashing
-    if (clamped !== currentValue) {
-        setCurrentValue(clamped);
+  // --- PHYSICS LOOP ---
+  useEffect(() => {
+    if (!isOpen || mode !== 'wheel') {
+        cancelAnimationFrame(rafRef.current);
+        return;
     }
-  }, [min, max, step, currentValue]);
 
-  // Initial Scroll Position - Synchronous Layout Effect
-  useLayoutEffect(() => {
-    if (isOpen && mode === 'wheel' && scrollRef.current) {
-         // Calculate exact position for initial value
-         const index = Math.round((initialValue - min) / step);
-         const targetScrollTop = index * ITEM_HEIGHT;
-         
-         // Apply immediately before paint
-         scrollRef.current.scrollTop = targetScrollTop;
-         
-         // Clear init flag after layout settles
-         if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
-         scrollTimeout.current = window.setTimeout(() => {
-             isInitializing.current = false;
-         }, 150);
-    }
-    return () => {
-         if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
+    const loop = () => {
+        const p = physics.current;
+        
+        if (!p.isDragging) {
+            // 1. Inertia
+            p.v *= FRICTION;
+            p.y += p.v;
+
+            // 2. Bounds & Rubber Banding
+            // We allow overscroll but spring back
+            let target = null;
+            if (p.y < 0) target = 0;
+            else if (p.y > maxScroll) target = maxScroll;
+
+            // 3. Snapping
+            // If dragging stopped, velocity is low, and we are within bounds -> Snap to item
+            if (target === null && Math.abs(p.v) < SNAP_THRESHOLD) {
+                const rawIdx = p.y / ITEM_HEIGHT;
+                const snapIdx = Math.round(rawIdx);
+                target = snapIdx * ITEM_HEIGHT;
+            }
+
+            // Apply force towards target if one exists
+            if (target !== null) {
+                const dist = target - p.y;
+                // Strong spring near target, weaker far away? No, constant spring is fine.
+                p.y += dist * SNAP_STRENGTH;
+                // Dampen velocity heavily when snapping/bounding to prevent oscillation
+                p.v *= 0.5;
+
+                // Stop if practically there
+                if (Math.abs(dist) < 0.1 && Math.abs(p.v) < 0.1) {
+                    p.y = target;
+                    p.v = 0;
+                }
+            }
+
+            // Update React state for rendering
+            // Optimize: only if changed > 0.1px
+            // Note: We access the REF value inside setScrollPos updater to ensure latest
+            setScrollPos(prev => {
+                if (Math.abs(prev - p.y) < 0.1) return prev;
+                return p.y;
+            });
+        }
+        
+        rafRef.current = requestAnimationFrame(loop);
     };
-  }, [isOpen, mode, initialValue, min, step]);
 
-  // Virtualization & 3D Rendering Helper
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [isOpen, mode, maxScroll]);
+
+  // --- TOUCH HANDLERS ---
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const p = physics.current;
+    p.isDragging = true;
+    p.v = 0; // Stop inertia
+    p.lastY = e.touches[0].clientY;
+    p.lastT = Date.now();
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const p = physics.current;
+    if (!p.isDragging) return;
+    
+    // STRICT AXIS LOCK: We ignore clientX completely.
+    const clientY = e.touches[0].clientY;
+    const dy = clientY - p.lastY; 
+    
+    // Apply delta to position
+    // Drag UP (negative dy) -> Scroll INCREASES (move down the list)
+    // So we subtract dy.
+    // Resistance at bounds (rubber band)
+    if (p.y < 0 || p.y > maxScroll) {
+        p.y -= dy * 0.4; // 60% resistance
+    } else {
+        p.y -= dy; // 1:1 movement
+    }
+
+    // Velocity tracking
+    // We use a simple moving average or just raw delta for "heavy" feel
+    // A heavy wheel doesn't accelerate instantly.
+    p.v = -dy; 
+
+    p.lastY = clientY;
+    p.lastT = Date.now();
+    
+    // Direct visual update to minimize lag
+    setScrollPos(p.y);
+  };
+
+  const handleTouchEnd = () => {
+    physics.current.isDragging = false;
+    // Velocity is already set in Move.
+    // The Loop will pick it up next frame.
+  };
+
+  // --- RENDER HELPERS ---
   const renderWheelItems = () => {
-    const windowSize = 40; 
-    const currentIndex = Math.round((currentValue - min) / step);
+    // Current Float Index based on Physics
+    const currentIndex = scrollPos / ITEM_HEIGHT;
     
-    const startIndex = Math.max(0, currentIndex - windowSize);
-    const endIndex = Math.min(totalSteps - 1, currentIndex + windowSize);
-    
-    const items = [];
-    for (let i = startIndex; i <= endIndex; i++) {
-        const itemVal = min + (i * step);
-        const offset = i * ITEM_HEIGHT;
-        const isSelected = i === currentIndex;
-        
-        // Distance from visual center
-        const distance = (i - currentIndex);
-        
-        // 3D & Visual Curves
-        const angle = distance * 20; 
-        const opacity = Math.max(0.1, 1 - Math.pow(Math.abs(distance) * 0.25, 2));
-        const scale = isSelected ? 1.1 : Math.max(0.85, 1 - Math.abs(distance) * 0.05);
+    // Windowing for performance
+    const renderWindow = 12; // +/- items to render
+    const centerIdxInt = Math.round(currentIndex);
+    const startIdx = Math.max(0, centerIdxInt - renderWindow);
+    const endIdx = Math.min(totalSteps - 1, centerIdxInt + renderWindow);
 
-        // Z-Index: Center items on top, but below overlay (overlay is z-150)
-        const zIndex = 100 - Math.abs(distance);
+    const items = [];
+    for (let i = startIdx; i <= endIdx; i++) {
+        const itemVal = min + (i * step);
+        // Distance from the exact center line (float)
+        const distance = i - currentIndex;
+        
+        // 3D Transform Logic
+        // Angle: 18 deg per item
+        const angle = distance * 18;
+        // Offset: Visual position relative to container center
+        const offset = distance * ITEM_HEIGHT;
+
+        // Visual Weight:
+        // Center = 1.0 scale, 1.0 opacity
+        // Edges fade fast
+        const absDist = Math.abs(distance);
+        const opacity = Math.max(0.15, 1 - Math.pow(absDist * 0.3, 2));
+        const scale = Math.max(0.8, 1 - Math.pow(absDist * 0.1, 2)); 
+        const zIndex = 100 - Math.round(absDist);
 
         items.push(
             <div
                 key={i}
-                className="absolute left-0 right-0 flex items-center justify-center transition-none will-change-transform"
+                className="absolute left-0 right-0 h-[50px] flex items-center justify-center will-change-transform"
                 style={{
-                    height: `${ITEM_HEIGHT}px`,
-                    top: `${offset}px`,
-                    opacity: opacity,
-                    zIndex: zIndex,
-                    transform: `rotateX(${-angle}deg) scale(${scale}) translateZ(0)`,
-                    color: isSelected ? '#111827' : '#6B7280',
-                    fontWeight: isSelected ? 700 : 500,
+                    top: '50%', // Centered
+                    marginTop: '-25px', // Half height offset
+                    opacity,
+                    zIndex,
+                    transform: `translateY(${offset}px) rotateX(${-angle}deg) scale(${scale}) translateZ(0)`,
+                    color: Math.abs(distance) < 0.5 ? '#111827' : '#6B7280',
+                    fontWeight: Math.abs(distance) < 0.5 ? 700 : 500,
+                    backfaceVisibility: 'hidden',
                     WebkitFontSmoothing: 'antialiased',
-                    backfaceVisibility: 'hidden'
                 }}
             >
-                <span className="text-xl tracking-tight tabular-nums">{itemVal}</span>
-                {unit && <span className="text-xs font-bold text-gray-400 ml-1 mt-1">{unit}</span>}
+               <span className="text-xl tracking-tight tabular-nums">{itemVal}</span>
+               {/* Always show unit to prevent layout shift */}
+               {unit && <span className="text-xs font-bold text-gray-400 ml-1 mt-1">{unit}</span>}
             </div>
         );
     }
@@ -151,10 +249,28 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
       if (!isNaN(parsed)) {
           const stepped = Math.round((parsed - min) / step) * step + min;
           let val = Math.max(min, Math.min(max, stepped));
-          setCurrentValue(val);
+          // Update physics to jump to new value
+          const newPos = ((val - min) / step) * ITEM_HEIGHT;
+          physics.current.y = newPos;
+          physics.current.v = 0;
+          setScrollPos(newPos);
       }
       setMode('wheel');
   };
+
+  const confirmValue = () => {
+      if (mode === 'manual') handleManualSave();
+      
+      // Calculate current value from physics position
+      const idx = Math.round(physics.current.y / ITEM_HEIGHT);
+      const val = min + (idx * step);
+      const clamped = Math.max(min, Math.min(max, val));
+      
+      onConfirm(clamped);
+      onClose();
+  };
+
+  const derivedCurrentValue = Math.max(min, Math.min(max, min + (Math.round(scrollPos / ITEM_HEIGHT) * step)));
 
   if (!isOpen) return null;
 
@@ -189,45 +305,56 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
         {/* Content */}
         <div className="w-full relative bg-white">
             {mode === 'wheel' ? (
-                <div className="relative h-[260px] w-full select-none overflow-hidden">
+                <div 
+                    className="relative h-[260px] w-full select-none overflow-hidden cursor-grab active:cursor-grabbing"
+                    // Touch Action None prevents browser scrolling - CRITICAL for axis locking
+                    style={{ touchAction: 'none' }} 
+                    ref={containerRef}
+                    onTouchStart={handleTouchStart}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                    // Mouse support for desktop testing
+                    onMouseDown={(e) => {
+                        const p = physics.current;
+                        p.isDragging = true;
+                        p.v = 0;
+                        p.lastY = e.clientY;
+                    }}
+                    onMouseMove={(e) => {
+                        if (physics.current.isDragging) {
+                            const p = physics.current;
+                            const dy = e.clientY - p.lastY;
+                            p.y -= dy;
+                            p.v = -dy;
+                            p.lastY = e.clientY;
+                            setScrollPos(p.y);
+                        }
+                    }}
+                    onMouseUp={() => { physics.current.isDragging = false; }}
+                    onMouseLeave={() => { physics.current.isDragging = false; }}
+                >
                     
-                    {/* Visual Mask for Organic Fading - Z-index boosted to cover items */}
+                    {/* Visual Mask */}
                     <div className="absolute inset-0 pointer-events-none z-[150] bg-gradient-to-b from-white via-transparent to-white opacity-90" 
                          style={{ maskImage: 'linear-gradient(to bottom, black 0%, transparent 40%, transparent 60%, black 100%)' }} />
 
                     {/* Center Highlight Indicator */}
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[200px] h-[44px] bg-gray-100/50 rounded-lg z-0 opacity-0" />
 
-                    {/* Wheel Container */}
+                    {/* 3D Container */}
                     <div 
-                        ref={scrollRef}
-                        className="absolute inset-0 overflow-y-auto no-scrollbar perspective-container"
-                        onScroll={handleScroll}
-                        style={{ 
-                            scrollSnapType: 'y mandatory',
-                            scrollBehavior: 'auto',
-                            WebkitOverflowScrolling: 'touch',
-                            perspective: '1000px',
-                            perspectiveOrigin: 'center center'
-                        }}
+                        className="absolute inset-0 perspective-container flex items-center justify-center"
+                        style={{ perspective: '1000px', perspectiveOrigin: 'center center' }}
                     >
-                        {/* Top Spacer */}
-                        <div style={{ height: `${ITEM_HEIGHT * 2.5}px` }} />
-                        
-                        {/* Scroll Content */}
-                        <div className="relative transform-style-3d" style={{ height: `${totalSteps * ITEM_HEIGHT}px` }}>
+                         <div className="relative w-full h-full transform-style-3d">
                              {renderWheelItems()}
-                        </div>
-
-                        {/* Bottom Spacer */}
-                        <div style={{ height: `${ITEM_HEIGHT * 2.5}px` }} />
+                         </div>
                     </div>
 
-                    {/* Tap Center to Edit */}
-                    <div 
-                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[200px] h-[50px] z-[200] cursor-pointer"
-                        onClick={() => setMode('manual')}
-                    />
+                    {/* Tap Center to Edit (Optional, might interfere with drag if not careful, z-index lower than touch handler) */}
+                    {/* We removed the explicit tap area; user can tap keyboard icon. 
+                        If we want tap-to-edit on value, we need to detect tap vs drag.
+                        For now, keeping it simple to ensure physics is robust. */}
                 </div>
             ) : (
                 <div className="h-[260px] flex flex-col items-center justify-center p-6 bg-gray-50/30">
@@ -241,7 +368,7 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
                                 value={manualInputValue}
                                 onChange={e => setManualInputValue(e.target.value)}
                                 className="w-full text-center text-3xl font-bold text-gray-900 outline-none bg-transparent placeholder-gray-200"
-                                placeholder={currentValue.toString()}
+                                placeholder={derivedCurrentValue.toString()}
                                 onKeyDown={(e) => { if (e.key === 'Enter') handleManualSave(); }}
                             />
                         </div>
@@ -256,13 +383,9 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
              <Button 
                 variant="primary" 
                 className="w-full shadow-lg shadow-gray-200/50"
-                onClick={() => {
-                    if (mode === 'manual') handleManualSave();
-                    onConfirm(currentValue);
-                    onClose();
-                }}
+                onClick={confirmValue}
             >
-                Confirm {unit ? `${currentValue}${unit}` : currentValue}
+                Confirm {unit ? `${derivedCurrentValue}${unit}` : derivedCurrentValue}
             </Button>
         </div>
 
