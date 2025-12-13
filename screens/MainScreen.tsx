@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Trash2, Plus, Minus, Sparkles } from 'lucide-react';
-import { Card } from '../components/Card';
+import { Minus, Plus } from 'lucide-react';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { BottomSheet } from '../components/BottomSheet';
 import { PageHeader } from '../components/layout/PageHeader';
 import { DaySwipeLayer } from '../components/layout/DaySwipeLayer';
+import { DailyView } from '../components/DailyView';
 import { api } from '../services/api';
 import { Meal } from '../types';
 
@@ -32,15 +32,26 @@ const MainScreen: React.FC<MainScreenProps> = ({
   setIsEmpty,
   setIsLoading
 }) => {
+  // Data State
   const [meals, setMeals] = useState<Meal[]>([]);
   const [selectedMealId, setSelectedMealId] = useState<number | null>(null);
-  const [selectedDateIndex, setSelectedDateIndex] = useState(3); // 3 is 'Today' in the generated range of 7 days
+  const [selectedDateIndex, setSelectedDateIndex] = useState(3); // 3 is 'Today'
+  
+  // Edit Meal State
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  
+  // Transition State
+  // We use refs for the DOM elements to animate performantly during drag
+  const currentViewRef = useRef<HTMLDivElement>(null);
+  const incomingViewRef = useRef<HTMLDivElement>(null);
+  // We track the "next" index being dragged into to show loading state
+  const [incomingDateIndex, setIncomingDateIndex] = useState<number | null>(null);
+  const [isAnimating, setIsAnimating] = useState(false);
 
   const selectedMeal = meals.find(m => m.id === selectedMealId);
 
-  // Generate dates once (stable for session)
+  // Generate dates
   const calendarDates = useMemo(() => {
     const dates = [];
     const today = new Date();
@@ -58,28 +69,17 @@ const MainScreen: React.FC<MainScreenProps> = ({
     return dates;
   }, []);
 
-  // Fetch Data when Date Changes or on Mount
+  // Fetch Data
   useEffect(() => {
     const fetchData = async () => {
-      // Don't fetch if offline (unless cached logic existed, but for wireframe we skip)
       if (isOffline && meals.length === 0) return; 
 
       setIsLoading(true);
       try {
-        // Simulate fetching for the specific date
         const targetDate = calendarDates[selectedDateIndex].fullDate;
         const fetchedMeals = await api.meals.list(targetDate);
         setMeals(fetchedMeals);
-        
-        // Only update global empty state if it's the current day or consistent logic
-        // For wireframe, we just show empty if the fetched list is empty
-        if (fetchedMeals.length === 0) {
-            // We only set the main Empty state if it's "today", otherwise just show empty list? 
-            // For simplicity in wireframe, we sync isEmpty
-             setIsEmpty(true);
-        } else {
-             setIsEmpty(false);
-        }
+        setIsEmpty(fetchedMeals.length === 0);
       } catch (err) {
         console.error("Failed to fetch meals", err);
       } finally {
@@ -89,16 +89,12 @@ const MainScreen: React.FC<MainScreenProps> = ({
     fetchData();
   }, [selectedDateIndex, isOffline, setIsEmpty, setIsLoading, calendarDates]);
 
-  useEffect(() => {
-    if (editingItemId && editInputRef.current) editInputRef.current.select();
-  }, [editingItemId]);
-
+  // Calculations
   const mealsToShow = isEmpty ? [] : meals;
   const totalKcal = mealsToShow.reduce((acc, curr) => acc + curr.kcal, 0);
   const goalKcal = 2000;
   const percentage = Math.min((totalKcal / goalKcal) * 100, 100);
   
-  // Status Logic
   let statusBadgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-100';
   let progressBarColor = 'bg-emerald-500';
   let statusText = 'On track';
@@ -116,10 +112,9 @@ const MainScreen: React.FC<MainScreenProps> = ({
       insightText = 'Calorie intake is below the daily target.';
   }
 
+  // Meal Handlers
   const updateItemGrams = async (mealId: number, itemId: number, newGrams: number) => {
     if (newGrams < 0) newGrams = 0;
-    
-    // Optimistic Update
     setMeals(prev => prev.map(meal => {
         if (meal.id !== mealId) return meal;
         const updatedItems = meal.items.map(item => {
@@ -138,28 +133,100 @@ const MainScreen: React.FC<MainScreenProps> = ({
         setMeals(prev => prev.filter(m => m.id !== id));
         onDeleteMeal();
         if (meals.length <= 1) setIsEmpty(true);
-    } catch (e) {
-        // Handle error
+    } catch (e) { }
+  };
+
+  // --- TRANSITION LOGIC ---
+
+  const handleSwipeStart = () => {
+    // Remove transition for instant drag response
+    if (currentViewRef.current) currentViewRef.current.style.transition = 'none';
+    if (incomingViewRef.current) incomingViewRef.current.style.transition = 'none';
+    setIsAnimating(true);
+  };
+
+  const handleSwipeProgress = (dx: number) => {
+    if (!currentViewRef.current) return;
+
+    // 1. Move Current View
+    currentViewRef.current.style.transform = `translateX(${dx}px)`;
+
+    // 2. Determine Incoming View Position
+    // If dx < 0 (swipe left), we are dragging in the NEXT day (from Right)
+    // If dx > 0 (swipe right), we are dragging in the PREV day (from Left)
+    const direction = dx < 0 ? 1 : -1; // 1 = Next, -1 = Prev
+    const nextIndex = selectedDateIndex + direction;
+
+    // Safety check for bounds
+    if (nextIndex < 0 || nextIndex >= calendarDates.length || (calendarDates[nextIndex].isFuture)) {
+       // Resistance effect if out of bounds
+       currentViewRef.current.style.transform = `translateX(${dx * 0.3}px)`;
+       if (incomingViewRef.current) incomingViewRef.current.style.opacity = '0';
+       return;
+    }
+
+    setIncomingDateIndex(nextIndex);
+
+    // Position Incoming View
+    if (incomingViewRef.current) {
+        incomingViewRef.current.style.opacity = '1';
+        const startX = direction === 1 ? '100%' : '-100%';
+        // The incoming view sits next to the current view
+        // translateX(100% + dx) if coming from right
+        // translateX(-100% + dx) if coming from left
+        // Note: Using pixel offset for dx, but % for initial placement
+        incomingViewRef.current.style.transform = `translateX(calc(${startX} + ${dx}px))`;
     }
   };
 
-  // Swipe Actions
-  const handleSwipeLeft = () => {
-    const nextIndex = selectedDateIndex + 1;
-    // Navigate to Next Day ONLY if it's not in the future
-    if (nextIndex < calendarDates.length && !calendarDates[nextIndex].isFuture) {
-        setSelectedDateIndex(nextIndex);
+  const handleSwipeEnd = (shouldSwitch: boolean, direction: 'left' | 'right') => {
+    if (!currentViewRef.current || !incomingViewRef.current) {
+        setIsAnimating(false);
+        return;
+    }
+
+    // Restore transition for the snap animation
+    const transition = 'transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
+    currentViewRef.current.style.transition = transition;
+    incomingViewRef.current.style.transition = transition;
+
+    // Determine target index based on drag, or default to current
+    const targetIndex = incomingDateIndex !== null ? incomingDateIndex : selectedDateIndex;
+    const isOutOfBounds = targetIndex < 0 || targetIndex >= calendarDates.length || (calendarDates[targetIndex].isFuture);
+    
+    // Switch Condition: User dragged far enough AND target is valid
+    if (shouldSwitch && !isOutOfBounds && incomingDateIndex !== null) {
+        // Slide Out Complete
+        const exitX = direction === 'left' ? '-100%' : '100%';
+        currentViewRef.current.style.transform = `translateX(${exitX})`;
+        incomingViewRef.current.style.transform = `translateX(0)`;
+
+        // Wait for animation to finish, then commit state
+        setTimeout(() => {
+            setSelectedDateIndex(targetIndex);
+            setIsAnimating(false);
+            setIncomingDateIndex(null);
+            // Reset styles for next time
+            if (currentViewRef.current) {
+                currentViewRef.current.style.transition = 'none';
+                currentViewRef.current.style.transform = '';
+            }
+        }, 300);
+    } else {
+        // Snap Back (Cancel)
+        currentViewRef.current.style.transform = `translateX(0)`;
+        const resetX = direction === 'left' ? '100%' : '-100%'; // Send incoming back to where it came from
+        incomingViewRef.current.style.transform = `translateX(${resetX})`;
+
+        setTimeout(() => {
+            setIsAnimating(false);
+            setIncomingDateIndex(null);
+        }, 300);
     }
   };
 
-  const handleSwipeRight = () => {
-    // Navigate to Previous Day (if available)
-    if (selectedDateIndex > 0) {
-        setSelectedDateIndex(prev => prev - 1);
-    }
-  };
 
-  // Header bottom content: Date Carousel
+  // Header Carousel
   const DateCarousel = (
     <div className="flex space-x-2 overflow-x-auto no-scrollbar snap-x pt-2">
       {calendarDates.map((item, i) => {
@@ -188,12 +255,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
   );
 
   return (
-    <DaySwipeLayer 
-        onSwipeLeft={handleSwipeLeft} 
-        onSwipeRight={handleSwipeRight}
-        disabled={!!selectedMeal} // Disable swipe if the details sheet is open
-        className="flex flex-col min-h-full bg-gray-50 font-sans text-gray-900"
-    >
+    <div className="flex flex-col min-h-full bg-gray-50 font-sans text-gray-900 overflow-hidden">
       <PageHeader 
         title={calendarDates[selectedDateIndex].isToday ? 'Today' : calendarDates[selectedDateIndex].fullDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
         subtitle="Daily Overview"
@@ -201,154 +263,74 @@ const MainScreen: React.FC<MainScreenProps> = ({
         bottomContent={DateCarousel}
       />
 
-      {/* Content Area */}
-      <div className="p-4 space-y-5 pb-28 pt-3 flex-1">
-        
-        {isLoading && (
-          <div className="space-y-4 animate-pulse">
-            <div className="bg-white rounded-2xl h-56 w-full"></div>
-            <div className="h-24 bg-white rounded-2xl w-full"></div>
-          </div>
-        )}
+      {/* Swipe Container */}
+      <DaySwipeLayer 
+        className="flex-1 relative overflow-hidden" 
+        onSwipeStart={handleSwipeStart}
+        onSwipeProgress={handleSwipeProgress}
+        onSwipeEnd={handleSwipeEnd}
+        disabled={!!selectedMeal}
+      >
+        <div className="relative w-full h-full p-4">
+            
+            {/* CURRENT VIEW */}
+            <div 
+                ref={currentViewRef}
+                className="absolute inset-0 p-4 pt-3 overflow-y-auto no-scrollbar w-full h-full"
+                // Using hardware acceleration hint
+                style={{ willChange: 'transform' }} 
+            >
+                 <DailyView 
+                    isLoading={isLoading}
+                    isEmpty={isEmpty}
+                    isOffline={isOffline}
+                    meals={meals}
+                    totalKcal={totalKcal}
+                    goalKcal={goalKcal}
+                    percentage={percentage}
+                    statusText={statusText}
+                    statusBadgeClass={statusBadgeClass}
+                    progressBarColor={progressBarColor}
+                    insightText={insightText}
+                    onAddClick={onAddClick}
+                    onDeleteMeal={handleMealDelete}
+                    onMealClick={setSelectedMealId}
+                 />
+            </div>
 
-        {!isLoading && (
-          <>
-            {/* 2) Summary Block */}
-            <Card variant="regular" className="pt-6 pb-6">
-                <div className="flex justify-between items-start mb-5">
-                    <div className="flex flex-col">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Calories</span>
-                        <div className="flex items-baseline gap-2">
-                            <span className={`text-4xl font-semibold tracking-tighter ${isEmpty ? 'text-gray-300' : 'text-gray-900'}`}>
-                                {isEmpty ? '0' : totalKcal.toLocaleString()}
-                            </span>
-                            <span className="text-sm font-medium text-gray-400">/ {goalKcal}</span>
-                        </div>
-                    </div>
-                    {!isEmpty && (
-                        <div className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide border ${statusBadgeClass}`}>
-                            {statusText}
-                        </div>
-                    )}
-                </div>
-
-                {/* Progress Bar */}
-                <div className="h-2 w-full bg-gray-100/80 rounded-full overflow-hidden mb-6">
-                    <div 
-                        className={`h-full rounded-full transition-all duration-700 ease-out ${isEmpty ? 'bg-transparent' : progressBarColor}`} 
-                        style={{ width: `${isEmpty ? 0 : percentage}%` }}
+            {/* INCOMING VIEW (Visible during drag) */}
+            {isAnimating && (
+                 <div 
+                    ref={incomingViewRef}
+                    className="absolute inset-0 p-4 pt-3 overflow-y-auto no-scrollbar w-full h-full"
+                    style={{ 
+                        transform: 'translateX(100%)', // Default off-screen right
+                        willChange: 'transform'
+                    }} 
+                >
+                    {/* Render Loading State for the incoming day */}
+                    <DailyView 
+                        isLoading={true} // Always loading during swipe until commit
+                        isEmpty={true}
+                        isOffline={isOffline}
+                        meals={[]}
+                        totalKcal={0}
+                        goalKcal={goalKcal}
+                        percentage={0}
+                        statusText="Loading"
+                        statusBadgeClass="bg-gray-50"
+                        progressBarColor="bg-gray-200"
+                        insightText="..."
+                        onAddClick={() => {}}
+                        onDeleteMeal={() => {}}
+                        onMealClick={() => {}}
                     />
                 </div>
-
-                {/* Macros */}
-                <div className="grid grid-cols-3 gap-4 border-t border-gray-50 pt-5">
-                     {[
-                        { label: 'Protein', val: isEmpty ? '-' : '140g', pct: '30%' },
-                        { label: 'Fats', val: isEmpty ? '-' : '65g', pct: '25%' },
-                        { label: 'Carbs', val: isEmpty ? '-' : '180g', pct: '45%' }
-                     ].map((m, i) => (
-                         <div key={i} className={`flex flex-col ${i === 0 ? 'items-start' : i === 2 ? 'items-end' : 'items-center'}`}>
-                             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">{m.label}</span>
-                             <div className="flex items-baseline gap-1.5">
-                                <span className="text-sm font-bold text-gray-900">{m.val}</span>
-                                <span className="text-[10px] text-gray-400 font-medium">{m.pct}</span>
-                             </div>
-                         </div>
-                     ))}
-                </div>
-            </Card>
-
-            {/* 3) Daily Insight Block */}
-            {!isEmpty && (
-                <div className="flex items-start gap-3.5 bg-blue-50/50 border border-blue-100/80 rounded-xl p-4 transition-colors">
-                    <Sparkles size={16} className="text-blue-500 mt-0.5 flex-shrink-0 opacity-80" fill="currentColor" fillOpacity={0.1} />
-                    <p className="text-xs font-medium text-gray-700 leading-relaxed">
-                        {insightText}
-                    </p>
-                </div>
             )}
+        </div>
+      </DaySwipeLayer>
 
-            {/* 4) Meals Block */}
-            <section className="space-y-4">
-                <div className="flex items-center justify-between px-1 pt-1">
-                    <h2 className="text-lg font-bold text-gray-900 tracking-tight">Meals</h2>
-                </div>
-
-                {isEmpty ? (
-                   <button 
-                      onClick={isOffline ? undefined : onAddClick}
-                      disabled={isOffline}
-                      className={`w-full py-12 flex flex-col items-center justify-center space-y-3 text-center border border-dashed border-gray-200 rounded-2xl bg-gray-50/50 transition-all group ${isOffline ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 hover:border-gray-300 active:scale-[0.99] cursor-pointer'}`}
-                   >
-                      <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm text-gray-400 group-hover:text-blue-500 group-hover:scale-110 transition-all duration-300">
-                        <Plus size={24} strokeWidth={2.5} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-gray-900">Log your first meal</p>
-                        <p className="text-xs text-gray-400 mt-1">Start tracking today</p>
-                      </div>
-                   </button>
-                ) : (
-                   <div className="space-y-4">
-                      {mealsToShow.map((meal) => {
-                        const previewText = meal.items.map(i => i.name).slice(0, 3).join(', ') + (meal.items.length > 3 ? ', ...' : '');
-
-                        return (
-                          <div key={meal.id} className="relative">
-                            <div className={`flex overflow-x-auto no-scrollbar snap-x rounded-2xl ${isOffline ? 'pointer-events-none opacity-80' : ''}`}>
-                                
-                                <Card 
-                                  variant="compact"
-                                  onClick={() => setSelectedMealId(meal.id)}
-                                  className="w-full flex-shrink-0 snap-center z-10 overflow-hidden py-4 border border-transparent hover:border-gray-100 transition-colors"
-                                >
-                                  <div className="flex justify-between items-center">
-                                    <div className="flex-1 min-w-0 pr-6">
-                                        <div className="flex items-center gap-2 mb-1.5">
-                                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{meal.time}</span>
-                                            <h3 className="text-base font-bold text-gray-900 truncate tracking-tight">{meal.title}</h3>
-                                        </div>
-                                        <p className="text-sm text-gray-500 truncate font-medium leading-normal">
-                                            {previewText}
-                                        </p>
-                                    </div>
-                                    <div className="flex flex-col items-end pl-2">
-                                        <span className="text-base font-bold text-gray-900">{meal.kcal}</span>
-                                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">kcal</span>
-                                    </div>
-                                  </div>
-                                </Card>
-
-                                {/* Swipe Action - This swipe is handled by CSS overflow, ignored by DaySwipeLayer */}
-                                <div 
-                                  className="w-[5rem] flex-shrink-0 snap-center bg-rose-50 flex flex-col items-center justify-center ml-[-1rem] pl-4 rounded-r-2xl active:bg-rose-100 transition-colors cursor-pointer z-0 group"
-                                  onClick={() => handleMealDelete(meal.id)}
-                                >
-                                    <Trash2 className="text-rose-500 mb-1 group-active:scale-90 transition-transform" size={20} />
-                                    <span className="text-rose-600 text-[9px] font-bold uppercase tracking-wider">Delete</span>
-                                </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      <Button
-                         variant="dashed"
-                         onClick={onAddClick}
-                         disabled={isOffline}
-                         className="w-full"
-                         icon={<Plus size={18} strokeWidth={2.5} />}
-                      >
-                         Add Meal
-                      </Button>
-                   </div>
-                )}
-            </section>
-          </>
-        )}
-      </div>
-
-      {/* --- MEAL DETAILS SHEET --- */}
+      {/* Details Sheet */}
       <BottomSheet
         isOpen={!!selectedMeal}
         onClose={() => setSelectedMealId(null)}
@@ -424,7 +406,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
              </div>
          )}
       </BottomSheet>
-    </DaySwipeLayer>
+    </div>
   );
 };
 

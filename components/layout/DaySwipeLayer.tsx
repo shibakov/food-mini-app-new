@@ -1,8 +1,9 @@
 import React, { useRef, TouchEvent } from 'react';
 
 interface DaySwipeLayerProps {
-  onSwipeLeft: () => void;
-  onSwipeRight: () => void;
+  onSwipeStart?: () => void;
+  onSwipeProgress?: (dx: number) => void;
+  onSwipeEnd?: (shouldSwitch: boolean, direction: 'left' | 'right') => void;
   children: React.ReactNode;
   className?: string;
   disabled?: boolean;
@@ -12,90 +13,114 @@ interface DaySwipeLayerProps {
  * A gesture wrapper that detects horizontal swipes to switch days.
  * 
  * Features:
+ * - 1:1 Gesture Tracking: Reports precise dx for fluid animations.
  * - Direction Locking: Distinguishes between vertical scroll and horizontal swipe.
- * - Conflict Avoidance: Ignores swipes on internal horizontally scrollable elements (e.g., Carousels).
- * - Input Safety: Ignores swipes when keyboard is likely active.
+ * - Conflict Avoidance: Ignores swipes on internal horizontally scrollable elements.
  */
 export const DaySwipeLayer: React.FC<DaySwipeLayerProps> = ({ 
-  onSwipeLeft, 
-  onSwipeRight, 
+  onSwipeStart,
+  onSwipeProgress,
+  onSwipeEnd,
   children,
   className = '', 
   disabled = false 
 }) => {
   const touchStart = useRef<{ x: number, y: number } | null>(null);
-
-  // Gesture Configuration
-  // Reduced to 40px for snappier feel
-  const MIN_SWIPE_DISTANCE = 40; 
-  const MAX_VERTICAL_VARIANCE = 50; // Max vertical drift allowed during a horizontal swipe
+  const isLocked = useRef<'horizontal' | 'vertical' | null>(null);
   
+  // Configuration
+  const SWIPE_THRESHOLD = 80; // px to commit to switch
+  const VELOCITY_THRESHOLD = 0.5; // px/ms
+
   const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
     if (disabled) return;
     
-    // 1. Ignore if text input is active (keyboard likely visible)
+    // 1. Ignore if text input is active
     const activeEl = document.activeElement as HTMLElement;
-    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
-        return;
-    }
+    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return;
 
-    // 2. Ignore if interacting with horizontal scroll containers
-    // We traverse up from target to currentTarget to find any element with 'overflow-x-auto'
+    // 2. Ignore if interacting with internal horizontal scroll containers
     let el = e.target as HTMLElement | null;
     let isInternalScroll = false;
-    
     while (el && el !== e.currentTarget) {
-        // Check for specific Tailwind class used in this project for scrollables
-        if (el.classList.contains('overflow-x-auto')) {
+        if (el.classList.contains('overflow-x-auto') || el.classList.contains('snap-x')) {
              isInternalScroll = true;
              break;
         }
         el = el.parentElement;
     }
-
     if (isInternalScroll) return;
 
     touchStart.current = {
       x: e.touches[0].clientX,
       y: e.touches[0].clientY
     };
+    isLocked.current = null;
+    
+    if (onSwipeStart) onSwipeStart();
+  };
+
+  const handleTouchMove = (e: TouchEvent<HTMLDivElement>) => {
+    if (!touchStart.current || disabled) return;
+
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const diffX = currentX - touchStart.current.x;
+    const diffY = currentY - touchStart.current.y;
+
+    // Determine Lock Direction
+    if (!isLocked.current) {
+      if (Math.abs(diffX) > 10 && Math.abs(diffX) > Math.abs(diffY)) {
+        isLocked.current = 'horizontal';
+      } else if (Math.abs(diffY) > 10) {
+        isLocked.current = 'vertical';
+      }
+    }
+
+    if (isLocked.current === 'horizontal') {
+      // Prevent browser back/forward navigation or native scroll
+      if (e.cancelable) e.preventDefault();
+      
+      if (onSwipeProgress) {
+        onSwipeProgress(diffX);
+      }
+    }
   };
 
   const handleTouchEnd = (e: TouchEvent<HTMLDivElement>) => {
-    if (!touchStart.current || disabled) return;
+    if (!touchStart.current || disabled || isLocked.current !== 'horizontal') {
+      touchStart.current = null;
+      isLocked.current = null;
+      // If we started a swipe but it wasn't valid, ensure we reset any offset
+      if (onSwipeEnd) onSwipeEnd(false, 'left'); 
+      return;
+    }
 
     const touchEnd = {
       x: e.changedTouches[0].clientX,
       y: e.changedTouches[0].clientY
     };
-
-    const diffX = touchStart.current.x - touchEnd.x; // Positive = Swipe Left (Finger moves left)
-    const diffY = touchStart.current.y - touchEnd.y;
     
-    // Reset immediately to avoid stale state
-    touchStart.current = null;
+    const diffX = touchEnd.x - touchStart.current.x;
+    const direction = diffX > 0 ? 'right' : 'left'; // Right = Prev Day, Left = Next Day
+    const absX = Math.abs(diffX);
 
-    // Logic:
-    // 1. Primary Axis Check: X distance must be significantly larger than Y
-    // 2. Threshold Check: X distance must be > MIN_SWIPE_DISTANCE
-    // 3. Vertical Constraint: Y distance must be < MAX_VERTICAL_VARIANCE (prevent triggering during sloppy scroll)
-    
-    if (Math.abs(diffX) > Math.abs(diffY)) {
-        if (Math.abs(diffX) > MIN_SWIPE_DISTANCE && Math.abs(diffY) < MAX_VERTICAL_VARIANCE) {
-            if (diffX > 0) {
-                // Finger moved left -> Content moves left -> Show Next Day
-                onSwipeLeft();
-            } else {
-                // Finger moved right -> Content moves right -> Show Prev Day
-                onSwipeRight();
-            }
-        }
+    // Velocity check (optional simple implementation)
+    // For now, rely on distance threshold
+    const shouldSwitch = absX > SWIPE_THRESHOLD;
+
+    if (onSwipeEnd) {
+      onSwipeEnd(shouldSwitch, direction);
     }
+
+    touchStart.current = null;
+    isLocked.current = null;
   };
 
   return (
     <div 
         onTouchStart={handleTouchStart} 
+        onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         className={className}
     >
