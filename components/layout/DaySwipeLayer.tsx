@@ -26,7 +26,8 @@ export const DaySwipeLayer: React.FC<DaySwipeLayerProps> = ({
   const touchStart = useRef<{ x: number, y: number } | null>(null);
 
   // Gesture Configuration
-  const MIN_SWIPE_DISTANCE = 50; // Minimum px to count as a swipe
+  // Reduced to 40px for snappier feel
+  const MIN_SWIPE_DISTANCE = 40; 
   const MAX_VERTICAL_VARIANCE = 50; // Max vertical drift allowed during a horizontal swipe
   
   const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {

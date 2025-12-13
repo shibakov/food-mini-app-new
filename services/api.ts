@@ -88,7 +88,8 @@ export const api = {
   meals: {
     // GET /daily-logs/{date}
     list: async (date: Date): Promise<Meal[]> => {
-      await delay(600); 
+      // Significantly reduced delay for snappier UI
+      await delay(250); 
       // In a real implementation: fetch(`/api/v1/daily-logs/${dateString}`)
       return [...MOCK_MEALS_STORE];
     },

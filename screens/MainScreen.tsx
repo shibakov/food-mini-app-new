@@ -145,9 +145,10 @@ const MainScreen: React.FC<MainScreenProps> = ({
 
   // Swipe Actions
   const handleSwipeLeft = () => {
-    // Navigate to Next Day (if available)
-    if (selectedDateIndex < calendarDates.length - 1) {
-        setSelectedDateIndex(prev => prev + 1);
+    const nextIndex = selectedDateIndex + 1;
+    // Navigate to Next Day ONLY if it's not in the future
+    if (nextIndex < calendarDates.length && !calendarDates[nextIndex].isFuture) {
+        setSelectedDateIndex(nextIndex);
     }
   };
 
