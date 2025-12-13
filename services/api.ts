@@ -1,150 +1,166 @@
+import {
+  DayResponse,
+  Meal,
+  MealItem,
+  ProductSearchResult,
+  AppSettings,
+  StatsResponse,
+  ISODate,
+  UUID,
+  MealType,
+  MacroMode
+} from './contracts/api.v1';
+
 /* ======================================================
-   API CONTRACTS v1
-   Source of truth for frontend ↔ backend interaction
+   API CONFIG
    ====================================================== */
 
-/* ---------- COMMON TYPES ---------- */
+const API_BASE_URL = '/api/v1';
 
-export type UUID = string; // backend returns uuid as string
-export type ISODate = string; // YYYY-MM-DD
+async function request<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    ...options,
+  });
 
-export type MacroKey = 'protein' | 'fat' | 'carbs';
-export type MacroMode = 'percent' | 'grams';
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `API error: ${res.status}`);
+  }
 
-export type InsightSeverity = 'positive' | 'neutral' | 'warning';
-
-/* ---------- NUTRITION ---------- */
-
-export interface NutritionPer100g {
-  calories: number;
-  protein: number;
-  fat: number;
-  carbs: number;
+  return res.json();
 }
 
-/* ---------- PRODUCTS ---------- */
+/* ======================================================
+   API METHODS
+   ====================================================== */
 
-export interface Product {
-  product_id: UUID;
-  name: string;
-  brand: string | null;
-  is_custom: boolean;
-}
+export const api = {
+  /* ---------- DAY / MAIN ---------- */
 
-export interface ProductSearchResult extends Product {
-  nutrition_per_100g: NutritionPer100g;
-}
+  getDay(date: ISODate): Promise<DayResponse> {
+    return request(`/day/${date}`);
+  },
 
-/* ---------- MEAL ITEMS ---------- */
+  /* ---------- MEALS ---------- */
 
-export type AddedVia = 'search' | 'manual' | 'label' | 'photo';
+  createMeal(data: {
+    date: ISODate;
+    type: MealType;
+    time: string;
+  }): Promise<{ meal_id: UUID }> {
+    return request(`/meals`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
 
-export interface ComputedNutrition {
-  calories: number;
-  protein: number;
-  fat: number;
-  carbs: number;
-}
+  deleteMeal(mealId: UUID): Promise<{ ok: true }> {
+    return request(`/meals/${mealId}`, {
+      method: 'DELETE',
+    });
+  },
 
-export interface MealItem {
-  item_id: UUID;
-  product: Product;
-  grams: number;
-  added_via: AddedVia;
-  computed: ComputedNutrition;
-}
+  getMeal(mealId: UUID): Promise<Meal> {
+    return request(`/meals/${mealId}`);
+  },
 
-/* ---------- MEALS ---------- */
+  /* ---------- MEAL ITEMS ---------- */
 
-export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
-
-export interface MealPreview {
-  items_count: number;
-  top_items: {
-    name: string;
-    grams: number;
-  }[];
-}
-
-export interface Meal {
-  meal_id: UUID;
-  date: ISODate;
-  type: MealType;
-  title: string;
-  time: string; // HH:mm
-  collapsed_preview?: MealPreview;
-  items?: MealItem[];
-  computed: ComputedNutrition;
-}
-
-/* ---------- DAY (MAIN SCREEN) ---------- */
-
-export interface DaySummary {
-  calories: {
-    consumed: number;
-    target: number;
-    tolerance: number;
-  };
-  macros: Record<
-    MacroKey,
-    {
-      consumed: number;
-      target: number;
+  addMealItem(
+    mealId: UUID,
+    data: {
+      product_id: UUID;
+      grams: number;
+      added_via: 'search' | 'manual' | 'label' | 'photo';
     }
-  >;
-}
+  ): Promise<{ item_id: UUID }> {
+    return request(`/meals/${mealId}/items`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
 
-export interface DayInsight {
-  text: string;
-  severity: InsightSeverity;
-}
+  updateMealItem(
+    mealId: UUID,
+    itemId: UUID,
+    data: { grams: number }
+  ): Promise<{ item_id: UUID }> {
+    return request(`/meals/${mealId}/items/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
 
-export interface DayResponse {
-  date: ISODate;
-  summary: DaySummary;
-  meals: Meal[];
-  insight: DayInsight | null;
-}
+  deleteMealItem(
+    mealId: UUID,
+    itemId: UUID
+  ): Promise<{ ok: true }> {
+    return request(`/meals/${mealId}/items/${itemId}`, {
+      method: 'DELETE',
+    });
+  },
 
-/* ---------- SETTINGS ---------- */
+  /* ---------- PRODUCTS ---------- */
 
-export interface MacroTargets {
-  protein: number;
-  fat: number;
-  carbs: number;
-}
+  searchProducts(query: string): Promise<{ results: ProductSearchResult[] }> {
+    return request(`/products/search?q=${encodeURIComponent(query)}`);
+  },
 
-export interface AppSettings {
-  calorie_target: number;
-  calorie_tolerance: number;
-  macro_mode: MacroMode;
-  macros: MacroTargets;
-}
+  createProduct(data: {
+    name: string;
+    brand: string | null;
+    nutrition_per_100g: {
+      calories: number;
+      protein: number;
+      fat: number;
+      carbs: number;
+    };
+    source: 'manual' | 'label';
+  }): Promise<{ product_id: UUID }> {
+    return request(`/products`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
 
-/* ---------- STATS ---------- */
+  updateProductNutrition(
+    productId: UUID,
+    nutrition_per_100g: {
+      calories: number;
+      protein: number;
+      fat: number;
+      carbs: number;
+    }
+  ): Promise<{ ok: true }> {
+    return request(`/products/${productId}/nutrition`, {
+      method: 'PATCH',
+      body: JSON.stringify({ nutrition_per_100g }),
+    });
+  },
 
-export type StatStatus = 'under' | 'ok' | 'over';
+  /* ---------- SETTINGS ---------- */
 
-export interface CaloriesStatPoint {
-  date: ISODate;
-  value: number;
-  status: StatStatus;
-}
+  getSettings(): Promise<AppSettings> {
+    return request(`/settings`);
+  },
 
-export interface MacroStatPoint {
-  date: ISODate;
-  value: number;
-}
+  saveSettings(settings: AppSettings): Promise<{ ok: true }> {
+    return request(`/settings`, {
+      method: 'PATCH',
+      body: JSON.stringify(settings),
+    });
+  },
 
-export interface StatsResponse {
-  range: '7d' | '14d' | '30d';
-  series: {
-    calories: CaloriesStatPoint[];
-    macros: Record<MacroKey, MacroStatPoint[]>;
-  };
-  insights: DayInsight[];
-}
+  /* ---------- STATS ---------- */
 
-/* ======================================================
-   END OF CONTRACTS
-   ====================================================== */
+  getStats(range: '7d' | '14d' | '30d'): Promise<StatsResponse> {
+    return request(`/stats?range=${range}`);
+  },
+};
