@@ -105,8 +105,14 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
              if (remainder === 0) break;
              const val = parseInt(newMacros[otherKey]) || 0;
              let change = remainder;
+             
+             // Snap change to step of 5 if possible for cleanliness, but preserve sum logic
+             // Actually, simplest logic is just add/subtract. 
+             // Since input is stepped by 5, usually diff is +/- 5.
+             
              if (val + change < 0) change = -val;
              if (val + change > 100) change = 100 - val;
+             
              newMacros[otherKey] = (val + change).toString();
              remainder -= change;
          }
@@ -148,7 +154,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
                     value={tolerance}
                     unit="± kcal"
                     disabled={isOffline}
-                    onClick={() => openPicker("Tolerance", tolerance, 0, 500, 10, "kcal", setTolerance)}
+                    onClick={() => openPicker("Tolerance", tolerance, 0, 500, 50, "kcal", setTolerance)}
                 />
                 <p className="text-[10px] text-gray-400 font-medium px-1">
                     Used to determine if you are "On Track" or "Over Limit".
@@ -179,11 +185,12 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
                         const color = k === 'p' ? 'bg-blue-500' : k === 'f' ? 'bg-amber-400' : 'bg-orange-400';
                         const val = parseInt(macros[k]) || 0;
                         const unit = macroMode === 'percent' ? '%' : 'g';
+                        const step = 5; // Step 5 for both % and g
                         
                         return (
                             <div 
                                 key={k}
-                                onClick={() => !isOffline && openPicker(label, val, 0, macroMode === 'percent' ? 100 : 1000, 1, unit, (v) => handleMacroChange(k, v))}
+                                onClick={() => !isOffline && openPicker(label, val, 0, macroMode === 'percent' ? 100 : 1000, step, unit, (v) => handleMacroChange(k, v))}
                                 className={`
                                     relative flex items-center justify-between p-1 pl-4 pr-1 h-[4.5rem] rounded-2xl border bg-white border-gray-100 hover:border-gray-200 active:scale-[0.99] cursor-pointer transition-all
                                     ${isOffline ? 'opacity-50 pointer-events-none' : ''}

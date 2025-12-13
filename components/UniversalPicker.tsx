@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Check, Keyboard, Delete, X, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
+import { Keyboard, X } from 'lucide-react';
 import { Button } from './Button';
 
 interface UniversalPickerProps {
@@ -15,8 +15,6 @@ interface UniversalPickerProps {
 }
 
 const ITEM_HEIGHT = 50;
-const VISIBLE_ROWS = 5; // Must be odd
-const MIDDLE_INDEX = Math.floor(VISIBLE_ROWS / 2);
 
 export const UniversalPicker: React.FC<UniversalPickerProps> = ({
   isOpen,
@@ -35,7 +33,8 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
   
   // Wheel State
   const scrollRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
+  const isInitializing = useRef(true);
+  const scrollTimeout = useRef<number | null>(null);
   
   // Reset on open
   useEffect(() => {
@@ -43,6 +42,7 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
       setCurrentValue(initialValue);
       setMode('wheel');
       setManualInputValue('');
+      isInitializing.current = true;
     }
   }, [isOpen, initialValue]);
 
@@ -50,47 +50,58 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
   useEffect(() => {
     if (mode === 'manual') {
       setManualInputValue(currentValue.toString());
-    } else {
-        // When switching back to wheel, ensure we snap effectively
-        // The scroll layout effect handles the visual snap
     }
   }, [mode, currentValue]);
 
   // --- WHEEL LOGIC ---
-  
-  // Generate range info
   const totalSteps = Math.floor((max - min) / step) + 1;
   
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
+    
+    // Ignore scroll events during initialization to prevent jumpiness or zero-reset
+    if (isInitializing.current) return;
+    
+    // Calculate index from scroll position
     const scrollTop = scrollRef.current.scrollTop;
     const index = Math.round(scrollTop / ITEM_HEIGHT);
     const newValue = min + (index * step);
     
     // Clamp
     const clamped = Math.max(min, Math.min(max, newValue));
+    
+    // Only update state if changed to prevent thrashing
     if (clamped !== currentValue) {
         setCurrentValue(clamped);
     }
   }, [min, max, step, currentValue]);
 
-  // Initial Scroll Position & Snap
-  useEffect(() => {
+  // Initial Scroll Position - Synchronous Layout Effect
+  useLayoutEffect(() => {
     if (isOpen && mode === 'wheel' && scrollRef.current) {
-        const index = Math.round((currentValue - min) / step);
-        scrollRef.current.scrollTop = index * ITEM_HEIGHT;
+         // Calculate exact position for initial value
+         const index = Math.round((initialValue - min) / step);
+         const targetScrollTop = index * ITEM_HEIGHT;
+         
+         // Apply immediately before paint
+         scrollRef.current.scrollTop = targetScrollTop;
+         
+         // Clear init flag after layout settles
+         if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
+         scrollTimeout.current = window.setTimeout(() => {
+             isInitializing.current = false;
+         }, 150);
     }
-  }, [isOpen, mode, min, step]); // Intentionally omitting currentValue to avoid loops
+    return () => {
+         if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
+    };
+  }, [isOpen, mode, initialValue, min, step]);
 
-  // Virtualization Helper
+  // Virtualization & 3D Rendering Helper
   const renderWheelItems = () => {
-    // We only render items around the current value to keep DOM light
-    // Window size: +/- 20 items is usually enough for smooth visual, 
-    // but for fast scrolling we might need more.
-    // CSS-based virtualization using absolute positioning in a tall container is robust.
+    const windowSize = 40; 
+    const currentIndex = Math.round((currentValue - min) / step);
     
-    const currentIndex = Math.floor((currentValue - min) / step);
-    const windowSize = 30; // Render range
     const startIndex = Math.max(0, currentIndex - windowSize);
     const endIndex = Math.min(totalSteps - 1, currentIndex + windowSize);
     
@@ -100,26 +111,35 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
         const offset = i * ITEM_HEIGHT;
         const isSelected = i === currentIndex;
         
-        // Calculate distance for styling
-        const distance = Math.abs(i - currentIndex);
-        const opacity = Math.max(0.2, 1 - (distance * 0.25));
-        const scale = Math.max(0.8, 1 - (distance * 0.05));
+        // Distance from visual center
+        const distance = (i - currentIndex);
         
+        // 3D & Visual Curves
+        const angle = distance * 20; 
+        const opacity = Math.max(0.1, 1 - Math.pow(Math.abs(distance) * 0.25, 2));
+        const scale = isSelected ? 1.1 : Math.max(0.85, 1 - Math.abs(distance) * 0.05);
+
+        // Z-Index: Center items on top, but below overlay (overlay is z-150)
+        const zIndex = 100 - Math.abs(distance);
+
         items.push(
             <div
                 key={i}
-                className="absolute left-0 right-0 flex items-center justify-center transition-all duration-75 will-change-transform"
+                className="absolute left-0 right-0 flex items-center justify-center transition-none will-change-transform"
                 style={{
                     height: `${ITEM_HEIGHT}px`,
                     top: `${offset}px`,
                     opacity: opacity,
-                    transform: `scale(${scale})`,
-                    fontWeight: isSelected ? 700 : 400,
-                    color: isSelected ? '#111827' : '#9CA3AF'
+                    zIndex: zIndex,
+                    transform: `rotateX(${-angle}deg) scale(${scale}) translateZ(0)`,
+                    color: isSelected ? '#111827' : '#6B7280',
+                    fontWeight: isSelected ? 700 : 500,
+                    WebkitFontSmoothing: 'antialiased',
+                    backfaceVisibility: 'hidden'
                 }}
             >
-                <span className="text-xl tracking-tight">{itemVal}</span>
-                {unit && isSelected && <span className="text-xs font-bold text-gray-400 ml-1 mt-1">{unit}</span>}
+                <span className="text-xl tracking-tight tabular-nums">{itemVal}</span>
+                {unit && <span className="text-xs font-bold text-gray-400 ml-1 mt-1">{unit}</span>}
             </div>
         );
     }
@@ -127,9 +147,10 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
   };
 
   const handleManualSave = () => {
-      const parsed = parseInt(manualInputValue);
+      let parsed = parseInt(manualInputValue);
       if (!isNaN(parsed)) {
-          let val = Math.max(min, Math.min(max, parsed));
+          const stepped = Math.round((parsed - min) / step) * step + min;
+          let val = Math.max(min, Math.min(max, stepped));
           setCurrentValue(val);
       }
       setMode('wheel');
@@ -144,69 +165,75 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
       <div className="fixed bottom-0 left-0 right-0 z-[70] bg-white rounded-t-[2rem] shadow-2xl flex flex-col pb-safe max-h-[90vh] animate-[slideUp_0.3s_cubic-bezier(0.16,1,0.3,1)] overflow-hidden">
         
         {/* Header */}
-        <div className="flex items-center justify-between px-4 pt-4 pb-2">
-            <button onClick={onClose} className="p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors">
-                <X size={20} />
+        <div className="flex items-center justify-between px-6 pt-5 pb-2">
+            <button onClick={onClose} className="p-2 -ml-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors">
+                <X size={22} />
             </button>
             <div className="flex flex-col items-center">
-                 <div className="w-10 h-1 bg-gray-200 rounded-full mb-2" />
-                 <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">{title}</span>
+                 <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">{title}</span>
             </div>
             {mode === 'manual' ? (
-                 <button onClick={handleManualSave} className="p-2 text-blue-600 font-bold hover:bg-blue-50 rounded-full transition-colors text-sm">
+                 <button onClick={handleManualSave} className="px-4 py-1.5 -mr-2 text-white bg-gray-900 font-bold rounded-full transition-colors text-sm shadow-sm active:scale-95">
                     Done
                 </button>
             ) : (
                 <button 
                     onClick={() => setMode('manual')}
-                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
+                    className="p-2 -mr-2 text-gray-400 hover:text-gray-900 hover:bg-gray-50 rounded-full transition-colors"
                 >
-                    <Keyboard size={20} />
+                    <Keyboard size={22} />
                 </button>
             )}
         </div>
 
         {/* Content */}
-        <div className="w-full relative">
+        <div className="w-full relative bg-white">
             {mode === 'wheel' ? (
-                <div className="relative h-[250px] w-full bg-white select-none">
-                    {/* Gradients */}
-                    <div className="absolute top-0 left-0 right-0 h-20 bg-gradient-to-b from-white to-transparent z-10 pointer-events-none" />
-                    <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white to-transparent z-10 pointer-events-none" />
+                <div className="relative h-[260px] w-full select-none overflow-hidden">
                     
-                    {/* Highlight Bar */}
-                    <div className="absolute top-1/2 left-0 right-0 h-[50px] -mt-[25px] bg-gray-50 border-t border-b border-gray-100 z-0" />
-                    
+                    {/* Visual Mask for Organic Fading - Z-index boosted to cover items */}
+                    <div className="absolute inset-0 pointer-events-none z-[150] bg-gradient-to-b from-white via-transparent to-white opacity-90" 
+                         style={{ maskImage: 'linear-gradient(to bottom, black 0%, transparent 40%, transparent 60%, black 100%)' }} />
+
+                    {/* Center Highlight Indicator */}
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[200px] h-[44px] bg-gray-100/50 rounded-lg z-0 opacity-0" />
+
                     {/* Wheel Container */}
                     <div 
                         ref={scrollRef}
-                        className="absolute inset-0 overflow-y-auto no-scrollbar scroll-smooth snap-y snap-mandatory"
+                        className="absolute inset-0 overflow-y-auto no-scrollbar perspective-container"
                         onScroll={handleScroll}
-                        style={{ scrollSnapType: 'y mandatory' }}
+                        style={{ 
+                            scrollSnapType: 'y mandatory',
+                            scrollBehavior: 'auto',
+                            WebkitOverflowScrolling: 'touch',
+                            perspective: '1000px',
+                            perspectiveOrigin: 'center center'
+                        }}
                     >
                         {/* Top Spacer */}
-                        <div style={{ height: `${ITEM_HEIGHT * 2}px` }} />
+                        <div style={{ height: `${ITEM_HEIGHT * 2.5}px` }} />
                         
-                        {/* Scroll Content (Fixed Height for Scroll Logic) */}
-                        <div className="relative" style={{ height: `${totalSteps * ITEM_HEIGHT}px` }}>
+                        {/* Scroll Content */}
+                        <div className="relative transform-style-3d" style={{ height: `${totalSteps * ITEM_HEIGHT}px` }}>
                              {renderWheelItems()}
                         </div>
 
                         {/* Bottom Spacer */}
-                        <div style={{ height: `${ITEM_HEIGHT * 2}px` }} />
+                        <div style={{ height: `${ITEM_HEIGHT * 2.5}px` }} />
                     </div>
 
-                    {/* Touch Overlay for "Manual Mode Trigger" on Center Click */}
+                    {/* Tap Center to Edit */}
                     <div 
-                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[200px] h-[50px] z-20 cursor-pointer"
+                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[200px] h-[50px] z-[200] cursor-pointer"
                         onClick={() => setMode('manual')}
                     />
                 </div>
             ) : (
-                <div className="h-[250px] flex flex-col items-center justify-center p-6 bg-gray-50/50">
-                    <div className="w-full max-w-[200px]">
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 block text-center">Enter Value</label>
-                        <div className="flex items-center bg-white border-2 border-blue-500 rounded-2xl px-4 h-16 shadow-sm focus-within:ring-4 ring-blue-500/10 transition-all">
+                <div className="h-[260px] flex flex-col items-center justify-center p-6 bg-gray-50/30">
+                    <div className="w-full max-w-[180px] animate-[fadeIn_0.2s_ease-out]">
+                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 block text-center">Enter Value</label>
+                        <div className="flex items-center bg-white border border-gray-200 rounded-2xl px-4 h-16 shadow-sm focus-within:ring-4 ring-gray-100 transition-all">
                              <input
                                 autoFocus
                                 type="number" 
@@ -218,24 +245,24 @@ export const UniversalPicker: React.FC<UniversalPickerProps> = ({
                                 onKeyDown={(e) => { if (e.key === 'Enter') handleManualSave(); }}
                             />
                         </div>
-                        {unit && <div className="text-center mt-2 text-sm font-bold text-gray-400">{unit}</div>}
+                        {unit && <div className="text-center mt-3 text-sm font-bold text-gray-400">{unit}</div>}
                     </div>
                 </div>
             )}
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-gray-100 bg-white">
+        <div className="p-4 pb-safe border-t border-gray-100 bg-white">
              <Button 
                 variant="primary" 
-                className="w-full"
+                className="w-full shadow-lg shadow-gray-200/50"
                 onClick={() => {
                     if (mode === 'manual') handleManualSave();
                     onConfirm(currentValue);
                     onClose();
                 }}
             >
-                Confirm {unit ? `${currentValue} ${unit}` : currentValue}
+                Confirm {unit ? `${currentValue}${unit}` : currentValue}
             </Button>
         </div>
 

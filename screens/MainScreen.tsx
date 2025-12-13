@@ -339,7 +339,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
                                         variant="inline"
                                         value={item.grams}
                                         unit="g"
-                                        onClick={() => openPicker(item.name, item.grams, 0, 5000, 1, 'g', (v) => updateItemGrams(selectedMeal.id, item.id, v))}
+                                        onClick={() => openPicker(item.name, item.grams, 0, 5000, 5, 'g', (v) => updateItemGrams(selectedMeal.id, item.id, v))}
                                         disabled={isOffline}
                                     />
                                 </div>

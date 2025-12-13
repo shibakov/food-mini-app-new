@@ -18,7 +18,6 @@ interface AddSheetProps {
   initialMealType?: string;
 }
 
-// ... (PhotoModal Code Omitted for brevity, assuming it remains same or is separate) ...
 const PhotoModal = ({ onClose, onCapture, mode = 'food' }: { onClose: () => void, onCapture: () => void, mode?: 'food' | 'label' }) => (
     <div className="fixed inset-0 z-[60] bg-black flex flex-col items-center justify-center text-white">
         <button onClick={onClose} className="absolute top-4 right-4 p-4">Close</button>
@@ -337,7 +336,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
                                                     variant="inline"
                                                     value={product.grams}
                                                     unit="g"
-                                                    onClick={() => openPicker(product.name, product.grams, 0, 5000, 1, 'g', (v) => updateGrams(product.id, v))}
+                                                    onClick={() => openPicker(product.name, product.grams, 0, 5000, 5, 'g', (v) => updateGrams(product.id, v))}
                                                 />
                                             </div>
                                         </div>
@@ -375,7 +374,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
                         <ValueTrigger 
                             value={customForm.kcal} 
                             unit="kcal" 
-                            onClick={() => openPicker("Calories / 100g", customForm.kcal, 0, 1000, 1, 'kcal', (v) => setCustomForm({...customForm, kcal: v}))}
+                            onClick={() => openPicker("Calories / 100g", customForm.kcal, 0, 1000, 50, 'kcal', (v) => setCustomForm({...customForm, kcal: v}))}
                         />
                     </div>
 
@@ -388,7 +387,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
                                     className="justify-center"
                                     value={customForm[macro as 'p'|'f'|'c']}
                                     unit="g"
-                                    onClick={() => openPicker(macro.toUpperCase(), customForm[macro as 'p'|'f'|'c'], 0, 100, 1, 'g', (v) => setCustomForm({...customForm, [macro]: v}))}
+                                    onClick={() => openPicker(macro.toUpperCase(), customForm[macro as 'p'|'f'|'c'], 0, 100, 5, 'g', (v) => setCustomForm({...customForm, [macro]: v}))}
                                 />
                             </div>
                         ))}
@@ -407,7 +406,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
                     <ValueTrigger 
                         value={advancedForm.k}
                         unit="kcal"
-                        onClick={() => openPicker("Calories / 100g", advancedForm.k, 0, 1000, 1, 'kcal', (v) => setAdvancedForm({...advancedForm, k: v}))}
+                        onClick={() => openPicker("Calories / 100g", advancedForm.k, 0, 1000, 50, 'kcal', (v) => setAdvancedForm({...advancedForm, k: v}))}
                     />
                  </div>
                  <div className="grid grid-cols-3 gap-3">
@@ -419,7 +418,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
                                     className="justify-center"
                                     value={advancedForm[macro as 'p'|'f'|'c']}
                                     unit="g"
-                                    onClick={() => openPicker(macro.toUpperCase(), advancedForm[macro as 'p'|'f'|'c'], 0, 100, 1, 'g', (v) => setAdvancedForm({...advancedForm, [macro]: v}))}
+                                    onClick={() => openPicker(macro.toUpperCase(), advancedForm[macro as 'p'|'f'|'c'], 0, 100, 5, 'g', (v) => setAdvancedForm({...advancedForm, [macro]: v}))}
                                 />
                         </div>
                     ))}
