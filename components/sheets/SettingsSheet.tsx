@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Check } from 'lucide-react';
 import { SegmentedControl } from '../SegmentedControl';
@@ -19,6 +20,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
   const [tolerance, setTolerance] = useState(100);
   const [macroMode, setMacroMode] = useState<'percent' | 'grams'>('percent');
   const [macros, setMacros] = useState({ p: '30', f: '35', c: '35' });
+  const [loading, setLoading] = useState(false);
   
   // Picker State
   const [pickerConfig, setPickerConfig] = useState<{
@@ -34,15 +36,17 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
 
   // Load Settings
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !isOffline) {
+      setLoading(true);
       api.settings.get().then(settings => {
         setCalorieTarget(settings.calorieTarget.toString());
         setTolerance(settings.tolerance);
         setMacroMode(settings.macroMode);
         setMacros(settings.macros);
-      });
+        setLoading(false);
+      }).catch(() => setLoading(false));
     }
-  }, [isOpen]);
+  }, [isOpen, isOffline]);
 
   const openPicker = (title: string, val: number, min: number, max: number, step: number, unit: string, onConfirm: (v: number) => void) => {
       setPickerConfig({ isOpen: true, title, value: val, min, max, step, unit, onConfirm });
@@ -67,18 +71,24 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
 
   const handleSave = async () => {
     if (!validationError && !isOffline) {
-      await api.settings.save({
-        calorieTarget: targetVal,
-        tolerance,
-        macroMode,
-        macros
-      });
-      onClose();
+      setLoading(true);
+      try {
+          await api.settings.save({
+            calorieTarget: targetVal,
+            tolerance,
+            macroMode,
+            macros
+          });
+          onClose();
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setLoading(false);
+      }
     }
   };
 
   const handleMacroChange = (key: 'p' | 'f' | 'c', newVal: number) => {
-    // Clamp
     const max = macroMode === 'percent' ? 100 : 1000;
     if (newVal < 0) newVal = 0;
     if (newVal > max) newVal = max;
@@ -88,28 +98,20 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
         return;
     }
 
-    // Percent Logic: Auto-balance to 100%
     const currentVal = parseInt(macros[key]) || 0;
     const diff = newVal - currentVal;
     if (diff === 0) return;
 
     const newMacros = { ...macros, [key]: newVal.toString() };
-    let remainder = -diff; // We need to apply this change to other macros to balance
+    let remainder = -diff; 
     
-    // Order of adjustment: p -> f -> c (skipping self)
     const others = ['p', 'f', 'c'].filter(k => k !== key) as ('p'|'f'|'c')[];
     
-    // Distribute remainder
     for (let i = 0; i < 2; i++) { 
          for (const otherKey of others) {
              if (remainder === 0) break;
              const val = parseInt(newMacros[otherKey]) || 0;
              let change = remainder;
-             
-             // Snap change to step of 5 if possible for cleanliness, but preserve sum logic
-             // Actually, simplest logic is just add/subtract. 
-             // Since input is stepped by 5, usually diff is +/- 5.
-             
              if (val + change < 0) change = -val;
              if (val + change > 100) change = 100 - val;
              
@@ -131,7 +133,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
         title="Settings"
         className="bg-gray-50/50"
         footer={
-            <Button variant="primary" onClick={handleSave} disabled={!!validationError || isOffline} className="w-full" icon={<Check size={20} />}>
+            <Button variant="primary" onClick={handleSave} disabled={!!validationError || isOffline || loading} isLoading={loading} className="w-full" icon={<Check size={20} />}>
                 Save Changes
             </Button>
         }
@@ -143,7 +145,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
                     label="Daily Calorie Target"
                     value={targetVal}
                     unit="kcal"
-                    disabled={isOffline}
+                    disabled={isOffline || loading}
                     onClick={() => openPicker("Daily Target", targetVal, 500, 10000, 50, "kcal", (v) => setCalorieTarget(v.toString()))}
                 />
             </Card>
@@ -153,12 +155,9 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
                     label="Tolerance Range"
                     value={tolerance}
                     unit="± kcal"
-                    disabled={isOffline}
+                    disabled={isOffline || loading}
                     onClick={() => openPicker("Tolerance", tolerance, 0, 500, 50, "kcal", setTolerance)}
                 />
-                <p className="text-[10px] text-gray-400 font-medium px-1">
-                    Used to determine if you are "On Track" or "Over Limit".
-                </p>
             </Card>
 
             <Card variant="regular" className="space-y-5">
@@ -171,7 +170,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
                         setMacroMode(v as 'percent' | 'grams'); 
                         setMacros(v === 'percent' ? { p: '30', f: '35', c: '35' } : { p: '150', f: '60', c: '200' }); 
                     }} 
-                    disabled={isOffline} 
+                    disabled={isOffline || loading} 
                     options={[
                         { label: 'Percent %', value: 'percent' }, 
                         { label: 'Grams g', value: 'grams' }
@@ -185,15 +184,15 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
                         const color = k === 'p' ? 'bg-blue-500' : k === 'f' ? 'bg-amber-400' : 'bg-orange-400';
                         const val = parseInt(macros[k]) || 0;
                         const unit = macroMode === 'percent' ? '%' : 'g';
-                        const step = 5; // Step 5 for both % and g
+                        const step = 5; 
                         
                         return (
                             <div 
                                 key={k}
-                                onClick={() => !isOffline && openPicker(label, val, 0, macroMode === 'percent' ? 100 : 1000, step, unit, (v) => handleMacroChange(k, v))}
+                                onClick={() => !isOffline && !loading && openPicker(label, val, 0, macroMode === 'percent' ? 100 : 1000, step, unit, (v) => handleMacroChange(k, v))}
                                 className={`
                                     relative flex items-center justify-between p-1 pl-4 pr-1 h-[4.5rem] rounded-2xl border bg-white border-gray-100 hover:border-gray-200 active:scale-[0.99] cursor-pointer transition-all
-                                    ${isOffline ? 'opacity-50 pointer-events-none' : ''}
+                                    ${(isOffline || loading) ? 'opacity-50 pointer-events-none' : ''}
                                 `}
                             >
                                 <div className="flex flex-col justify-center gap-1.5">
@@ -211,23 +210,6 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
                         );
                     })}
                 </div>
-
-                {macroMode === 'grams' && (
-                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                        <div className="flex justify-between items-center mb-2">
-                            <span className="text-xs font-semibold text-gray-500">Calculated Energy</span>
-                            <span className={`text-xs font-bold ${derivedKcalForGrams > targetVal ? 'text-rose-500' : 'text-gray-900'}`}>
-                                {Math.round(derivedKcalForGrams)} / {targetVal} kcal
-                            </span>
-                        </div>
-                        <div className="h-1.5 w-full bg-gray-200 rounded-full overflow-hidden">
-                            <div 
-                                className={`h-full rounded-full transition-all ${derivedKcalForGrams > targetVal ? 'bg-rose-500' : 'bg-blue-500'}`} 
-                                style={{ width: `${derivedKcalPct}%` }} 
-                            />
-                        </div>
-                    </div>
-                )}
                 
                 {validationError && (
                     <div className="flex items-start gap-3 text-rose-600 bg-rose-50 p-4 rounded-xl border border-rose-100 animate-[fadeIn_0.2s_ease-out]">

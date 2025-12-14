@@ -1,3 +1,4 @@
+
 export interface NutritionBase {
   k: number; // Calories
   p: number; // Protein
@@ -6,7 +7,7 @@ export interface NutritionBase {
 }
 
 export interface Product {
-  id: number;
+  id: string | number;
   name: string;
   brand?: string;
   grams: number;
@@ -14,14 +15,17 @@ export interface Product {
   kcal: number; // Calculated total kcal for current grams
 }
 
-export interface MealItem extends Product {}
+export interface MealItem extends Product {
+  item_id?: string | number;
+}
 
 export interface Meal {
-  id: number;
+  id: string | number;
   time: string;
   title: string;
   kcal: number;
   items: MealItem[];
+  type?: string;
 }
 
 export interface DailyStats {

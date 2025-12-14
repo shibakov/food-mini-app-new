@@ -1,31 +1,13 @@
-import {
-  DayResponse,
-  Meal,
-  MealItem,
-  ProductSearchResult,
-  AppSettings,
-  StatsResponse,
-  ISODate,
-  UUID,
-  MealType,
-  MacroMode
-} from './contracts/api.v1';
 
-/* ======================================================
-   API CONFIG
-   ====================================================== */
+import { Meal, MealItem, Product, SearchResult, AppSettings, DailyStats, MealType } from '../types';
 
-const API_BASE_URL = '/api/v1';
+const API_BASE_URL = 'https://gateway-api-food-mini-app-production.up.railway.app';
 
-async function request<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       'Content-Type': 'application/json',
     },
-    credentials: 'include',
     ...options,
   });
 
@@ -37,130 +19,50 @@ async function request<T>(
   return res.json();
 }
 
-/* ======================================================
-   API METHODS
-   ====================================================== */
-
 export const api = {
-  /* ---------- DAY / MAIN ---------- */
-
-  getDay(date: ISODate): Promise<DayResponse> {
-    return request(`/day/${date}`);
+  // Core Requirement: GET /day/summary
+  // Backend is single source of truth for calculations.
+  getDaySummary: (date: Date): Promise<DailyStats> => {
+    const dateStr = date.toISOString().split('T')[0];
+    return request<DailyStats>(`/day/summary?date=${dateStr}`);
   },
 
-  /* ---------- MEALS ---------- */
-
-  createMeal(data: {
-    date: ISODate;
-    type: MealType;
-    time: string;
-  }): Promise<{ meal_id: UUID }> {
-    return request(`/meals`, {
+  // Core Requirement: POST /food/log
+  // Send intent data only.
+  logFood: (data: { product_id: string | number; grams: number; timestamp: string; meal_type?: string }): Promise<any> => {
+    return request(`/food/log`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
-  deleteMeal(mealId: UUID): Promise<{ ok: true }> {
-    return request(`/meals/${mealId}`, {
-      method: 'DELETE',
-    });
+  // Helpers mapped to expected backend endpoints
+  meals: {
+    // Legacy support if UI still calls specific item management, though logFood is primary.
+    // Assuming backend supports RESTful management of logged items via /meals or similar.
+    delete: (id: string | number) => request(`/meals/${id}`, { method: 'DELETE' }),
+    updateItem: (mealId: string | number, itemId: string | number, data: { grams: number }) => 
+      request(`/meals/${mealId}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteItem: (mealId: string | number, itemId: string | number) => 
+      request(`/meals/${mealId}/items/${itemId}`, { method: 'DELETE' })
   },
 
-  getMeal(mealId: UUID): Promise<Meal> {
-    return request(`/meals/${mealId}`);
+  products: {
+    search: (query: string): Promise<SearchResult[]> => {
+      return request<{ results: SearchResult[] }>(`/products/search?q=${encodeURIComponent(query)}`)
+        .then(res => res.results || []);
+    },
+    create: (data: any) => request(`/products`, { method: 'POST', body: JSON.stringify(data) }),
+    updateNutrition: (id: string | number, base: any) => 
+      request(`/products/${id}/nutrition`, { method: 'PATCH', body: JSON.stringify({ nutrition_per_100g: base }) })
   },
 
-  /* ---------- MEAL ITEMS ---------- */
-
-  addMealItem(
-    mealId: UUID,
-    data: {
-      product_id: UUID;
-      grams: number;
-      added_via: 'search' | 'manual' | 'label' | 'photo';
-    }
-  ): Promise<{ item_id: UUID }> {
-    return request(`/meals/${mealId}/items`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+  settings: {
+    get: (): Promise<AppSettings> => request(`/settings`),
+    save: (settings: AppSettings) => request(`/settings`, { method: 'PATCH', body: JSON.stringify(settings) })
   },
 
-  updateMealItem(
-    mealId: UUID,
-    itemId: UUID,
-    data: { grams: number }
-  ): Promise<{ item_id: UUID }> {
-    return request(`/meals/${mealId}/items/${itemId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  },
-
-  deleteMealItem(
-    mealId: UUID,
-    itemId: UUID
-  ): Promise<{ ok: true }> {
-    return request(`/meals/${mealId}/items/${itemId}`, {
-      method: 'DELETE',
-    });
-  },
-
-  /* ---------- PRODUCTS ---------- */
-
-  searchProducts(query: string): Promise<{ results: ProductSearchResult[] }> {
-    return request(`/products/search?q=${encodeURIComponent(query)}`);
-  },
-
-  createProduct(data: {
-    name: string;
-    brand: string | null;
-    nutrition_per_100g: {
-      calories: number;
-      protein: number;
-      fat: number;
-      carbs: number;
-    };
-    source: 'manual' | 'label';
-  }): Promise<{ product_id: UUID }> {
-    return request(`/products`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  },
-
-  updateProductNutrition(
-    productId: UUID,
-    nutrition_per_100g: {
-      calories: number;
-      protein: number;
-      fat: number;
-      carbs: number;
-    }
-  ): Promise<{ ok: true }> {
-    return request(`/products/${productId}/nutrition`, {
-      method: 'PATCH',
-      body: JSON.stringify({ nutrition_per_100g }),
-    });
-  },
-
-  /* ---------- SETTINGS ---------- */
-
-  getSettings(): Promise<AppSettings> {
-    return request(`/settings`);
-  },
-
-  saveSettings(settings: AppSettings): Promise<{ ok: true }> {
-    return request(`/settings`, {
-      method: 'PATCH',
-      body: JSON.stringify(settings),
-    });
-  },
-
-  /* ---------- STATS ---------- */
-
-  getStats(range: '7d' | '14d' | '30d'): Promise<StatsResponse> {
-    return request(`/stats?range=${range}`);
-  },
+  stats: {
+    get: (range: string) => request(`/stats?range=${range}`)
+  }
 };

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Trash2, Plus, Minus, Sparkles } from 'lucide-react';
 import { Card } from './Card';
@@ -18,8 +19,9 @@ interface DailyViewProps {
   progressBarColor: string;
   insightText: string;
   onAddClick: () => void;
-  onDeleteMeal: (id: number) => void;
-  onMealClick: (id: number) => void;
+  onDeleteMeal: (id: string | number) => void;
+  onMealClick: (id: string | number) => void;
+  macros: { p: number; f: number; c: number };
 }
 
 export const DailyView: React.FC<DailyViewProps> = ({
@@ -36,7 +38,8 @@ export const DailyView: React.FC<DailyViewProps> = ({
   insightText,
   onAddClick,
   onDeleteMeal,
-  onMealClick
+  onMealClick,
+  macros
 }) => {
   if (isLoading) {
     return (
@@ -81,15 +84,14 @@ export const DailyView: React.FC<DailyViewProps> = ({
           {/* Macros */}
           <div className="grid grid-cols-3 gap-4 border-t border-gray-50 pt-5">
                {[
-                  { label: 'Protein', val: isEmpty ? '-' : '140g', pct: '30%' },
-                  { label: 'Fats', val: isEmpty ? '-' : '65g', pct: '25%' },
-                  { label: 'Carbs', val: isEmpty ? '-' : '180g', pct: '45%' }
+                  { label: 'Protein', val: isEmpty ? '-' : `${Math.round(macros.p)}g`, pct: '30%' }, // Pct placeholders for now
+                  { label: 'Fats', val: isEmpty ? '-' : `${Math.round(macros.f)}g`, pct: '25%' },
+                  { label: 'Carbs', val: isEmpty ? '-' : `${Math.round(macros.c)}g`, pct: '45%' }
                ].map((m, i) => (
                    <div key={i} className={`flex flex-col ${i === 0 ? 'items-start' : i === 2 ? 'items-end' : 'items-center'}`}>
                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">{m.label}</span>
                        <div className="flex items-baseline gap-1.5">
                           <span className="text-sm font-bold text-gray-900">{m.val}</span>
-                          <span className="text-[10px] text-gray-400 font-medium">{m.pct}</span>
                        </div>
                    </div>
                ))}

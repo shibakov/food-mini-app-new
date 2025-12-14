@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Home, Plus, BarChart2, WifiOff, RotateCcw } from 'lucide-react';
 import MainScreen from './screens/MainScreen';
@@ -13,13 +14,16 @@ export default function App() {
   // Sheet Management
   const [isAddSheetOpen, setIsAddSheetOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [addSheetInitialType, setAddSheetInitialType] = useState<string | undefined>(undefined);
+  const [addSheetContext, setAddSheetContext] = useState<{ type?: string; mealId?: string | number } | null>(null);
 
   // Global UI State
   const [isLoading, setIsLoading] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [isEmpty, setIsEmpty] = useState(false);
   const [toast, setToast] = useState<{ message: string; onUndo?: () => void } | null>(null);
+  
+  // Data Consistency
+  const [dataVersion, setDataVersion] = useState(0);
 
   // Auto-hide toast
   useEffect(() => {
@@ -41,19 +45,20 @@ export default function App() {
   };
 
   const openGenericAddSheet = () => {
-    setAddSheetInitialType(undefined);
+    setAddSheetContext(null);
     setIsAddSheetOpen(true);
   };
 
-  const openEditMealSheet = (mealType: string) => {
-    setAddSheetInitialType(mealType);
+  const openEditMealSheet = (mealType: string, mealId?: string | number) => {
+    setAddSheetContext({ type: mealType, mealId });
     setIsAddSheetOpen(true);
   };
 
   const handleAddSheetSave = () => {
     setIsAddSheetOpen(false);
     setActiveTab('main');
-    setIsEmpty(false); // Assume adding a meal makes it not empty
+    // Trigger a data refresh in MainScreen
+    setDataVersion(v => v + 1);
   };
 
   const isOverlayOpen = isAddSheetOpen || isSettingsOpen;
@@ -72,6 +77,7 @@ export default function App() {
             onDeleteMeal={showUndoToast}
             setIsEmpty={setIsEmpty}
             setIsLoading={setIsLoading}
+            dataVersion={dataVersion}
           />
         );
       case 'stats':
@@ -98,7 +104,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Content Area - Fixed: Removed overflow-y-auto to allow screens to handle it */}
+      {/* Main Content Area */}
       <main className="flex-1 relative overflow-hidden bg-gray-50">
         {renderContent()}
       </main>
@@ -108,7 +114,8 @@ export default function App() {
         isOpen={isAddSheetOpen} 
         onClose={() => setIsAddSheetOpen(false)} 
         onSave={handleAddSheetSave}
-        initialMealType={addSheetInitialType}
+        initialMealType={addSheetContext?.type}
+        existingMealId={addSheetContext?.mealId}
         isOffline={isOffline}
       />
       <SettingsSheet 
@@ -163,20 +170,6 @@ export default function App() {
           </button>
         </nav>
       )}
-
-      {/* DEV TOOLS */}
-      <div className="fixed top-20 right-0 p-2 flex flex-col gap-1 z-[100] opacity-0 hover:opacity-100 transition-opacity bg-white/80 backdrop-blur rounded-l-lg border border-r-0 border-gray-200 shadow-sm pointer-events-none hover:pointer-events-auto">
-        <button onClick={() => setIsLoading(!isLoading)} className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded font-mono text-gray-600">
-          {isLoading ? 'Stop Load' : 'Load'}
-        </button>
-        <button onClick={() => setIsEmpty(!isEmpty)} className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded font-mono text-gray-600">
-          {isEmpty ? 'Fill' : 'Empty'}
-        </button>
-        <button onClick={() => setIsOffline(!isOffline)} className="text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded font-mono text-gray-600">
-          {isOffline ? 'Online' : 'Offline'}
-        </button>
-      </div>
-
     </div>
   );
 }

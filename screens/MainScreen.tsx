@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Minus, Plus, Edit2 } from 'lucide-react';
 import { Button } from '../components/Button';
 import { BottomSheet } from '../components/BottomSheet';
@@ -8,11 +9,11 @@ import { DailyView } from '../components/DailyView';
 import { UniversalPicker } from '../components/UniversalPicker';
 import { ValueTrigger } from '../components/ValueTrigger';
 import { api } from '../services/api';
-import { Meal } from '../types';
+import { Meal, DailyStats } from '../types';
 
 interface MainScreenProps {
   onAddClick: () => void;
-  onEditMeal: (mealType: string) => void;
+  onEditMeal: (mealType: string, mealId?: string | number) => void;
   onSettingsClick: () => void;
   isOffline: boolean;
   isEmpty: boolean;
@@ -20,6 +21,7 @@ interface MainScreenProps {
   setIsEmpty: (val: boolean) => void;
   setIsLoading: (val: boolean) => void;
   isLoading: boolean;
+  dataVersion?: number;
 }
 
 const MainScreen: React.FC<MainScreenProps> = ({ 
@@ -31,11 +33,13 @@ const MainScreen: React.FC<MainScreenProps> = ({
   isEmpty,
   onDeleteMeal,
   setIsEmpty,
-  setIsLoading
+  setIsLoading,
+  dataVersion = 0
 }) => {
-  // Data State
-  const [meals, setMeals] = useState<Meal[]>([]);
-  const [selectedMealId, setSelectedMealId] = useState<number | null>(null);
+  // Data State - NOW USING STATS AS TRUTH
+  const [stats, setStats] = useState<DailyStats | null>(null);
+  const [goalKcal, setGoalKcal] = useState(2000);
+  const [selectedMealId, setSelectedMealId] = useState<string | number | null>(null);
   const [selectedDateIndex, setSelectedDateIndex] = useState(3);
   
   // Picker State
@@ -60,6 +64,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
   const [incomingDateIndex, setIncomingDateIndex] = useState<number | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
+  const meals = stats?.meals || [];
   const selectedMeal = meals.find(m => m.id === selectedMealId);
 
   // Generate dates
@@ -80,32 +85,45 @@ const MainScreen: React.FC<MainScreenProps> = ({
     return dates;
   }, []);
 
-  // Fetch Data
-  useEffect(() => {
-    const fetchData = async () => {
-      if (isOffline && meals.length === 0) return; 
-
-      setIsLoading(true);
-      try {
+  const fetchData = useCallback(async () => {
+    if (isOffline) return;
+    setIsLoading(true);
+    try {
         const targetDate = calendarDates[selectedDateIndex].fullDate;
-        const fetchedMeals = await api.meals.list(targetDate);
-        setMeals(fetchedMeals);
-        setIsEmpty(fetchedMeals.length === 0);
-      } catch (err) {
-        console.error("Failed to fetch meals", err);
-      } finally {
+        
+        // Fetch Settings for Goal (Single source of truth)
+        api.settings.get().then(s => setGoalKcal(s.calorieTarget)).catch(console.error);
+
+        // Use getDaySummary instead of meals.list
+        const summary = await api.getDaySummary(targetDate);
+        setStats(summary);
+        setIsEmpty(!summary.meals || summary.meals.length === 0);
+    } catch (err) {
+        console.error("Failed to fetch daily summary", err);
+    } finally {
         setIsLoading(false);
-      }
-    };
-    fetchData();
+    }
   }, [selectedDateIndex, isOffline, setIsEmpty, setIsLoading, calendarDates]);
 
-  // Calculations
-  const mealsToShow = isEmpty ? [] : meals;
-  const totalKcal = mealsToShow.reduce((acc, curr) => acc + curr.kcal, 0);
-  const goalKcal = 2000;
+  // Fetch Data on Mount/Change or when dataVersion changes
+  useEffect(() => {
+    fetchData();
+  }, [fetchData, dataVersion]);
+
+  // Calculations (FROM BACKEND)
+  // We strictly use values from `stats`.
+  const totalKcal = stats?.totalKcal || 0;
+  
+  // Progress Calculation (UI Logic only)
   const percentage = Math.min((totalKcal / goalKcal) * 100, 100);
   
+  // Macros from backend
+  const macros = {
+      p: stats?.protein || 0,
+      f: stats?.fats || 0,
+      c: stats?.carbs || 0
+  };
+
   let statusBadgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-100';
   let progressBarColor = 'bg-emerald-500';
   let statusText = 'On track';
@@ -123,32 +141,27 @@ const MainScreen: React.FC<MainScreenProps> = ({
       insightText = 'Calorie intake is below the daily target.';
   }
 
-  // Meal Handlers
-  const updateItemGrams = async (mealId: number, itemId: number, newGrams: number) => {
-    if (newGrams < 0) newGrams = 0;
-    setMeals(prev => prev.map(meal => {
-        if (meal.id !== mealId) return meal;
-        const updatedItems = meal.items.map(item => {
-            if (item.id !== itemId) return item;
-            const kcalPerGram = item.grams > 0 ? item.kcal / item.grams : 0;
-            return { ...item, grams: newGrams, kcal: Math.round(newGrams * kcalPerGram) };
-        });
-        const newMealTotal = updatedItems.reduce((sum, i) => sum + i.kcal, 0);
-        return { ...meal, items: updatedItems, kcal: newMealTotal };
-    }));
+  // Handlers
+  const handleUpdateItemGrams = async (mealId: string | number, itemId: string | number, newGrams: number) => {
+    try {
+        await api.meals.updateItem(mealId, itemId, { grams: newGrams });
+        await fetchData(); // Refresh summary from backend
+    } catch (e) {
+        console.error("Failed to update grams", e);
+    }
   };
 
-  const handleMealDelete = async (id: number) => {
+  const handleMealDelete = async (id: string | number) => {
     try {
         await api.meals.delete(id);
-        setMeals(prev => prev.filter(m => m.id !== id));
+        await fetchData(); // Refresh summary from backend
         onDeleteMeal();
-        if (meals.length <= 1) setIsEmpty(true);
-    } catch (e) { }
+    } catch (e) {
+        console.error("Failed to delete meal", e);
+    }
   };
 
   // --- TRANSITION LOGIC ---
-
   const handleSwipeStart = () => {
     if (currentViewRef.current) currentViewRef.current.style.transition = 'none';
     if (incomingViewRef.current) incomingViewRef.current.style.transition = 'none';
@@ -278,6 +291,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
                     onAddClick={onAddClick}
                     onDeleteMeal={handleMealDelete}
                     onMealClick={setSelectedMealId}
+                    macros={macros}
                  />
             </div>
             {isAnimating && (
@@ -301,6 +315,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
                         onAddClick={() => {}}
                         onDeleteMeal={() => {}}
                         onMealClick={() => {}}
+                        macros={{ p: 0, f: 0, c: 0 }}
                     />
                 </div>
             )}
@@ -322,7 +337,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
             </div>
         ) : undefined}
         footer={
-             <Button variant="primary" onClick={() => selectedMeal && onEditMeal(selectedMeal.title)} disabled={isOffline} className="w-full" icon={<Plus size={20} />}>
+             <Button variant="primary" onClick={() => selectedMeal && onEditMeal(selectedMeal.title, selectedMeal.id)} disabled={isOffline} className="w-full" icon={<Plus size={20} />}>
                 Add products
             </Button>
         }
@@ -339,7 +354,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
                                         variant="inline"
                                         value={item.grams}
                                         unit="g"
-                                        onClick={() => openPicker(item.name, item.grams, 0, 5000, 5, 'g', (v) => updateItemGrams(selectedMeal.id, item.id, v))}
+                                        onClick={() => openPicker(item.name, item.grams, 0, 5000, 5, 'g', (v) => handleUpdateItemGrams(selectedMeal.id, item.item_id || item.id, v))}
                                         disabled={isOffline}
                                     />
                                 </div>

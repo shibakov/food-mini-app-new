@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Camera, Check, Trash2, Edit2, AlertCircle, Plus, ArrowLeft, ScanBarcode, Keyboard, Sparkles, RotateCcw, Minus, Calculator } from 'lucide-react';
 import { SegmentedControl } from '../SegmentedControl';
@@ -16,23 +17,16 @@ interface AddSheetProps {
   onSave: () => void;
   isOffline?: boolean;
   initialMealType?: string;
+  existingMealId?: string | number;
 }
-
-const PhotoModal = ({ onClose, onCapture, mode = 'food' }: { onClose: () => void, onCapture: () => void, mode?: 'food' | 'label' }) => (
-    <div className="fixed inset-0 z-[60] bg-black flex flex-col items-center justify-center text-white">
-        <button onClick={onClose} className="absolute top-4 right-4 p-4">Close</button>
-        <div onClick={onCapture} className="w-20 h-20 bg-white rounded-full cursor-pointer" />
-        <p className="mt-4">Tap to Capture (Mock)</p>
-    </div>
-);
-
 
 export const AddSheet: React.FC<AddSheetProps> = ({ 
   isOpen, 
   onClose, 
   onSave, 
   isOffline = false,
-  initialMealType
+  initialMealType,
+  existingMealId
 }) => {
   const [sheetView, setSheetView] = useState<'main' | 'custom' | 'edit_nutrition'>('main');
   const [mealType, setMealType] = useState<MealType>('Breakfast');
@@ -44,21 +38,16 @@ export const AddSheet: React.FC<AddSheetProps> = ({
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Photo / Custom State
-  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
-  const [photoMode, setPhotoMode] = useState<'food' | 'label'>('food');
-  const [detectedItems, setDetectedItems] = useState<any[]>([]);
-  const [customMethod, setCustomMethod] = useState<'manual' | 'label'>('manual');
+  // Custom State
   const [customForm, setCustomForm] = useState({ name: '', brand: '', kcal: 0, p: 0, f: 0, c: 0 });
   
   // Edit State
-  const [advancedEditId, setAdvancedEditId] = useState<number | null>(null);
+  const [advancedEditId, setAdvancedEditId] = useState<number | string | null>(null);
   const [advancedForm, setAdvancedForm] = useState({ k: 0, p: 0, f: 0, c: 0 });
   
   // Status
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ id: number; item: Product; index: number } | null>(null);
 
   // Picker State
   const [pickerConfig, setPickerConfig] = useState<{
@@ -83,14 +72,14 @@ export const AddSheet: React.FC<AddSheetProps> = ({
       setSearchQuery('');
       setSearchResults([]);
       setInputMethod('search');
-      setDetectedItems([]);
       setProducts([]); 
       setAdvancedEditId(null);
-      setToast(null);
       setCustomForm({ name: '', brand: '', kcal: 0, p: 0, f: 0, c: 0 });
       setIsSaving(false);
       setSaveError(null);
-      // Logic for meal type default omitted
+      if (initialMealType) {
+          setMealType(initialMealType as MealType);
+      }
     }
   }, [isOpen, initialMealType]);
 
@@ -98,8 +87,12 @@ export const AddSheet: React.FC<AddSheetProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (searchQuery.trim().length > 0) {
-        const results = await api.products.search(searchQuery);
-        setSearchResults(results);
+        try {
+            const results = await api.products.search(searchQuery);
+            setSearchResults(results);
+        } catch (e) {
+            setSearchResults([]);
+        }
       } else {
         setSearchResults([]);
       }
@@ -107,57 +100,61 @@ export const AddSheet: React.FC<AddSheetProps> = ({
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Logic Helpers
   const calculateKcal = (grams: number, baseKcal: number) => Math.round((grams / 100) * baseKcal);
 
   const handleAddProduct = (item: SearchResult) => {
+    // Generate temp ID for UI list
+    const tempId = Date.now().toString(); 
+    // VISUAL ONLY ESTIMATE for draft list. Not used for persistent data.
     const totalKcal = calculateKcal(item.grams, item.base.k);
-    const newProduct: Product = { ...item, id: Date.now(), kcal: totalKcal };
+    const newProduct: Product = { ...item, id: tempId, kcal: totalKcal };
     setProducts(prev => [...prev, newProduct]);
     setSearchQuery('');
     setSearchResults([]);
   };
 
-  const handlePhotoCapture = () => {
-    setIsPhotoModalOpen(false);
-    if (photoMode === 'food') {
-      const mockDetected = [
-        { id: Date.now() + 1, name: 'Grilled Chicken', grams: 150, base: { k: 165, p: 31, f: 3.6, c: 0 }, kcal: 248, confidence: 'High' },
-      ];
-      setDetectedItems(mockDetected);
+  const saveCustomProduct = async () => {
+    if (!customForm.name) return;
+    setIsSaving(true);
+    try {
+        // Create product immediately in backend
+        const res = await api.products.create({
+            name: customForm.name,
+            brand: customForm.brand,
+            base: { k: customForm.kcal, p: customForm.p, f: customForm.f, c: customForm.c }
+        });
+        
+        // Response format handling might need adjustment based on real API
+        // Assuming returns { product_id: ... }
+        const productId = (res as any).product_id || (res as any).id;
+
+        const newProduct: Product = {
+            id: productId,
+            name: customForm.name,
+            brand: customForm.brand || 'Custom',
+            grams: 100,
+            base: { k: customForm.kcal, p: customForm.p, f: customForm.f, c: customForm.c },
+            kcal: customForm.kcal
+        };
+        setProducts(prev => [...prev, newProduct]);
+        setSheetView('main');
+        setCustomForm({ name: '', brand: '', kcal: 0, p: 0, f: 0, c: 0 });
+    } catch (e) {
+        console.error("Failed to create custom product", e);
+    } finally {
+        setIsSaving(false);
     }
   };
 
-  const saveCustomProduct = () => {
-    if (!customForm.name) return;
-    const newProduct: Product = {
-        id: Date.now(),
-        name: customForm.name,
-        brand: customForm.brand || 'Custom',
-        grams: 100,
-        base: { k: customForm.kcal, p: customForm.p, f: customForm.f, c: customForm.c },
-        kcal: customForm.kcal
-    };
-    setProducts(prev => [...prev, newProduct]);
-    setSheetView('main');
-    setCustomForm({ name: '', brand: '', kcal: 0, p: 0, f: 0, c: 0 });
-  };
-
-  const updateGrams = (id: number, newGrams: number) => {
+  const updateGrams = (id: string | number, newGrams: number) => {
     setProducts(prev => prev.map(p => {
       if (p.id !== id) return p;
       return { ...p, grams: newGrams, kcal: calculateKcal(newGrams, p.base.k) };
     }));
   };
 
-  const handleDelete = (id: number) => {
-    if (isOffline) return;
-    const index = products.findIndex(p => p.id === id);
-    if (index === -1) return;
-    const itemToRemove = products[index];
+  const handleDelete = (id: string | number) => {
     setProducts(prev => prev.filter(p => p.id !== id));
-    setToast({ id, item: itemToRemove, index });
-    setTimeout(() => setToast(current => (current?.id === id ? null : current)), 4000);
   };
 
   const openAdvancedEdit = (product: Product) => {
@@ -185,21 +182,30 @@ export const AddSheet: React.FC<AddSheetProps> = ({
   const handleConfirm = async () => {
     if (products.length === 0) return;
     setIsSaving(true);
+    setSaveError(null);
     try {
-        await api.meals.add({
-          time: new Date().toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit', hour12: false}),
-          title: mealType,
-          kcal: products.reduce((acc, p) => acc + p.kcal, 0),
-          items: products
-        });
+        // Log all items individually
+        // Timestamp is "now" for logging
+        const now = new Date().toISOString();
+        
+        for (const p of products) {
+            await api.logFood({
+                product_id: p.id, // Assuming id is valid from search/create
+                grams: p.grams,
+                timestamp: now,
+                meal_type: mealType // Context for grouping
+            });
+        }
+        
         onSave(); 
     } catch (e) {
         setIsSaving(false);
         setSaveError("Failed to save.");
+        console.error(e);
     }
   };
 
-  let titleNode: React.ReactNode = initialMealType ? `Add to ${initialMealType}` : 'Add Meal';
+  let titleNode: React.ReactNode = existingMealId ? `Add to ${initialMealType}` : 'Add Meal';
   let leftActionNode: React.ReactNode = undefined;
   let footerNode: React.ReactNode = undefined;
 
@@ -216,6 +222,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
             >
                 Save Meal
             </Button>
+            {saveError && <div className="text-center text-xs text-rose-500 font-bold">{saveError}</div>}
         </div>
       );
   } else if (sheetView === 'custom') {
@@ -226,7 +233,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
           </button>
       );
       footerNode = (
-          <Button variant="primary" className="w-full" disabled={!customForm.name} onClick={saveCustomProduct}>
+          <Button variant="primary" className="w-full" disabled={!customForm.name || isSaving} isLoading={isSaving} onClick={saveCustomProduct}>
               Add Product
           </Button>
       );
@@ -239,7 +246,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
       );
       footerNode = (
           <Button variant="primary" className="w-full" onClick={saveAdvancedEdit}>
-              Save Changes
+              Confirm Local Changes
           </Button>
       );
   }
@@ -248,8 +255,6 @@ export const AddSheet: React.FC<AddSheetProps> = ({
 
   return (
     <>
-      {isPhotoModalOpen && <PhotoModal mode={photoMode} onClose={() => setIsPhotoModalOpen(false)} onCapture={handlePhotoCapture} />}
-
       <BottomSheet
         isOpen={isOpen}
         onClose={onClose}
@@ -259,7 +264,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
       >
         {sheetView === 'main' && (
             <>
-                {!initialMealType && (
+                {!initialMealType && !existingMealId && (
                     <div className="mb-6">
                         <SegmentedControl
                             value={mealType}
@@ -293,6 +298,12 @@ export const AddSheet: React.FC<AddSheetProps> = ({
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 disabled={isOffline}
                             />
+                            {/* Create Custom Prompt */}
+                            {!searchQuery && (
+                                <button onClick={() => setSheetView('custom')} className="w-full py-3 text-sm font-semibold text-blue-600 bg-blue-50 rounded-xl hover:bg-blue-100 transition-colors">
+                                    + Create Custom Product
+                                </button>
+                            )}
 
                             {searchResults.length > 0 && (
                                 <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 max-h-60 overflow-y-auto">
@@ -311,8 +322,8 @@ export const AddSheet: React.FC<AddSheetProps> = ({
                             )}
                         </div>
                     ) : (
-                        <div className="h-32 rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 flex flex-col items-center justify-center gap-3 transition-colors hover:bg-gray-100 hover:border-gray-300">
-                             <span className="text-sm font-semibold text-blue-600">Camera Mock</span>
+                        <div className="h-32 rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 flex flex-col items-center justify-center gap-3">
+                             <span className="text-sm font-semibold text-gray-400">Photo feature unavailable offline or requires backend support.</span>
                         </div>
                     )}
                 </div>
@@ -399,7 +410,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
         {sheetView === 'edit_nutrition' && (
             <div className="space-y-6">
                  <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
-                    <p className="text-sm text-blue-800 leading-relaxed font-medium">Changes affect only this item.</p>
+                    <p className="text-sm text-blue-800 leading-relaxed font-medium">Changes affect this item in the draft list only.</p>
                  </div>
                  <div className="space-y-2">
                     <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider pl-1">Calories (per 100g)</label>

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { Card } from '../components/Card';
@@ -10,14 +11,25 @@ interface StatsScreenProps {
   isEmpty: boolean;
 }
 
-const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading, isEmpty }) => {
+const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading: globalLoading, isEmpty: globalEmpty }) => {
   const [period, setPeriod] = useState<7 | 14 | 30>(7);
   const [data, setData] = useState<any[]>([]);
+  const [localLoading, setLocalLoading] = useState(false);
 
   useEffect(() => {
-    // In a real app, this would set local loading state if global isn't enough
-    api.stats.getHistory(period).then(setData);
+    setLocalLoading(true);
+    const rangeMap = { 7: '7d', 14: '14d', 30: '30d' } as const;
+    api.stats.get(rangeMap[period]).then((res: any) => {
+        setData(res.history || []); // Assuming API returns { history: [...] }
+        setLocalLoading(false);
+    }).catch(e => {
+        console.error("Failed to fetch stats", e);
+        setLocalLoading(false);
+    });
   }, [period]);
+
+  const isLoading = globalLoading || localLoading;
+  const isDataEmpty = data.length === 0;
 
   const targetKcal = 2000;
   const tolerance = 200;
@@ -57,7 +69,6 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading, i
   );
 
   return (
-    // Added overflow-y-auto no-scrollbar to root container
     <div className="flex flex-col h-full overflow-y-auto no-scrollbar bg-gray-50 font-sans text-gray-900">
       
       <PageHeader 
@@ -75,23 +86,20 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading, i
                 <div className="h-64 bg-white rounded-2xl w-full"></div>
                 <div className="h-32 bg-white rounded-2xl w-full"></div>
             </div>
-        ) : isEmpty ? (
+        ) : isDataEmpty ? (
             <div className="flex-1 flex flex-col items-center justify-center py-24 opacity-40">
                 <div className="w-16 h-16 bg-gray-200 rounded-full mb-4"></div>
                 <p className="font-semibold text-gray-400">No data for this period</p>
             </div>
         ) : (
             <>
-                {/* 3) Calories Chart */}
                 <Card variant="regular" className="pt-6 pb-6">
                     <div className="flex justify-between items-baseline px-1 mb-6">
                         <h2 className="text-sm font-bold text-gray-900 tracking-tight">Calories</h2>
                         <span className="text-xs font-semibold text-gray-400">Avg: <span className="text-gray-900">{avgKcal}</span></span>
                     </div>
                     
-                    {/* Chart Container */}
                     <div className="relative h-48 w-full mt-2 mb-2">
-                        {/* Target Line */}
                         <div 
                             className="absolute left-0 right-0 border-t border-dashed border-gray-200 z-0 flex items-end justify-end pr-1 opacity-80"
                             style={{ bottom: `${targetPct}%` }}
@@ -99,7 +107,6 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading, i
                             <span className="text-[9px] font-bold text-gray-400 -mb-3.5 bg-white pl-1 rounded">Target</span>
                         </div>
 
-                        {/* Bars */}
                         <div className="absolute inset-0 flex items-end justify-between gap-1 z-10">
                             {data.map((day, i) => {
                                 const heightPct = Math.min((day.kcal / maxScale) * 100, 100);
@@ -112,23 +119,15 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading, i
                                             />
                                         </div>
                                         <span className="text-[9px] font-bold text-gray-300 text-center mt-2 h-3 uppercase tracking-wider group-hover:text-gray-500 transition-colors">
-                                            {day.label}
+                                            {day.label || i}
                                         </span>
                                     </div>
                                 );
                             })}
                         </div>
                     </div>
-                    
-                    {/* Legend */}
-                    <div className="flex justify-center gap-6 text-[10px] font-semibold text-gray-400 pt-3">
-                        <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500"></div>On Track</div>
-                        <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-amber-300"></div>Under</div>
-                        <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-rose-400"></div>Over</div>
-                    </div>
                 </Card>
 
-                {/* 4) Macro Trends */}
                 <Card variant="regular">
                     <h2 className="text-sm font-bold text-gray-900 px-1 mb-5 tracking-tight">Macro Trends</h2>
                     <div className="space-y-6">
@@ -138,13 +137,11 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading, i
                             { label: 'Carbs', avg: avgCarbs, data: data.map(d => d.c), max: 300, color: 'bg-orange-400' }
                         ].map((macro, idx) => (
                             <div key={idx} className="flex flex-col gap-2">
-                                {/* Header */}
                                 <div className="flex justify-between items-baseline px-1">
                                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{macro.label}</span>
                                     <span className="text-xs font-bold text-gray-900">{macro.avg}g <span className="text-gray-300 font-normal">avg</span></span>
                                 </div>
                                 
-                                {/* Chart */}
                                 <div className="h-10 w-full flex items-end justify-between gap-px bg-white rounded-lg overflow-hidden p-0 border border-transparent">
                                     {macro.data.map((val: number, i: number) => (
                                         <div key={i} className="flex-1 h-full flex items-end relative group bg-gray-50/50">
@@ -158,41 +155,6 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading, i
                             </div>
                         ))}
                     </div>
-                </Card>
-
-                {/* 5) Insights */}
-                <Card variant="regular" className="space-y-4">
-                    <h3 className="text-sm font-bold text-gray-900 tracking-tight">Insights</h3>
-                    <ul className="space-y-3">
-                        <li className="text-xs text-gray-500 font-medium leading-relaxed flex items-start gap-3">
-                            <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-100 mt-0.5 flex-shrink-0">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                            </span>
-                            <span>Calorie target met on <span className="font-bold text-gray-900">{daysOnTrack} of {data.length} days</span>.</span>
-                        </li>
-                        {daysOver > 0 && (
-                            <li className="text-xs text-gray-500 font-medium leading-relaxed flex items-start gap-3">
-                                <span className="flex items-center justify-center w-4 h-4 rounded-full bg-rose-100 mt-0.5 flex-shrink-0">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                                </span>
-                                <span>Limit exceeded on <span className="font-bold text-gray-900">{daysOver} days</span>.</span>
-                            </li>
-                        )}
-                        {daysUnder > 0 && (
-                            <li className="text-xs text-gray-500 font-medium leading-relaxed flex items-start gap-3">
-                                <span className="flex items-center justify-center w-4 h-4 rounded-full bg-amber-100 mt-0.5 flex-shrink-0">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                                </span>
-                                <span>Below target on <span className="font-bold text-gray-900">{daysUnder} days</span>.</span>
-                            </li>
-                        )}
-                        <li className="text-xs text-gray-500 font-medium leading-relaxed flex items-start gap-3">
-                            <span className="flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 mt-0.5 flex-shrink-0">
-                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                            </span>
-                            <span>Average protein intake is <span className="font-bold text-gray-900">{avgProtein}g</span> (Goal: 140g).</span>
-                        </li>
-                    </ul>
                 </Card>
             </>
         )}
