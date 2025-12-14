@@ -13,22 +13,33 @@ type JsonRecord = Record<string, any>;
 const API_BASE_URL = 'https://gateway-api-food-mini-app-production.up.railway.app/v1';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
+  try {
+    const res = await fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+      ...options,
+    });
 
-  const payload = await res.json().catch(() => null);
+    const payload = await res.json().catch(() => null);
 
-  if (!res.ok) {
-    const errorMessage = (payload && payload.error?.message) || `API error: ${res.status}`;
-    throw new Error(errorMessage);
+    if (!res.ok) {
+      const errorMessage = (payload && payload.error?.message) || `API error: ${res.status}`;
+      throw new Error(errorMessage);
+    }
+
+    return payload as T;
+  } catch (e) {
+    if (e instanceof TypeError) {
+      const offline = typeof navigator !== 'undefined' && !navigator.onLine;
+      const hint = offline
+        ? 'offline or gateway unreachable'
+        : 'network or CORS error while calling gateway';
+      throw new Error(`Request failed: ${hint}`);
+    }
+    throw e as Error;
   }
-
-  return payload as T;
 }
 
 function toAppSettings(payload: JsonRecord): AppSettings {
