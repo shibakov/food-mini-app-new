@@ -5,6 +5,7 @@ import MainScreen from './screens/MainScreen';
 import StatsScreen from './screens/StatsScreen';
 import { AddSheet } from './components/sheets/AddSheet';
 import { SettingsSheet } from './components/sheets/SettingsSheet';
+import { AddSheetContext } from './types';
 
 type Tab = 'main' | 'stats';
 
@@ -14,16 +15,37 @@ export default function App() {
   // Sheet Management
   const [isAddSheetOpen, setIsAddSheetOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [addSheetContext, setAddSheetContext] = useState<{ type?: string; mealId?: string | number } | null>(null);
+  const [addSheetContext, setAddSheetContext] = useState<AddSheetContext | null>(null);
 
   // Global UI State
-  const [isLoading, setIsLoading] = useState(false);
-  const [isOffline, setIsOffline] = useState(false);
-  const [isEmpty, setIsEmpty] = useState(false);
+  const [isMainLoading, setIsMainLoading] = useState(false);
+  const [isMainEmpty, setIsMainEmpty] = useState(false);
+  const [isOffline, setIsOffline] = useState(() => (typeof navigator !== 'undefined' ? !navigator.onLine : false));
   const [toast, setToast] = useState<{ message: string; onUndo?: () => void } | null>(null);
   
   // Data Consistency
   const [dataVersion, setDataVersion] = useState(0);
+
+  // Online / Offline listeners
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      setDataVersion(v => v + 1);
+    };
+    const handleOffline = () => {
+      setIsOffline(true);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Auto-hide toast
   useEffect(() => {
@@ -44,18 +66,20 @@ export default function App() {
     });
   };
 
-  const openGenericAddSheet = () => {
-    setAddSheetContext(null);
+  const openGenericAddSheet = (context?: AddSheetContext) => {
+    const fallbackDate = new Date();
+    setAddSheetContext(context ?? { date: fallbackDate });
     setIsAddSheetOpen(true);
   };
 
-  const openEditMealSheet = (mealType: string, mealId?: string | number) => {
-    setAddSheetContext({ type: mealType, mealId });
+  const openEditMealSheet = (context: AddSheetContext) => {
+    setAddSheetContext(context);
     setIsAddSheetOpen(true);
   };
 
   const handleAddSheetSave = () => {
     setIsAddSheetOpen(false);
+    setAddSheetContext(null);
     setActiveTab('main');
     // Trigger a data refresh in MainScreen
     setDataVersion(v => v + 1);
@@ -71,21 +95,20 @@ export default function App() {
             onAddClick={openGenericAddSheet} 
             onEditMeal={openEditMealSheet}
             onSettingsClick={() => setIsSettingsOpen(true)} 
-            isLoading={isLoading}
+            isLoading={isMainLoading}
             isOffline={isOffline}
-            isEmpty={isEmpty}
+            isEmpty={isMainEmpty}
             onDeleteMeal={showUndoToast}
-            setIsEmpty={setIsEmpty}
-            setIsLoading={setIsLoading}
+            setIsEmpty={setIsMainEmpty}
+            setIsLoading={setIsMainLoading}
             dataVersion={dataVersion}
           />
         );
       case 'stats':
         return (
           <StatsScreen 
-            onSettingsClick={() => setIsSettingsOpen(true)} 
-            isLoading={isLoading}
-            isEmpty={isEmpty}
+            onSettingsClick={() => setIsSettingsOpen(true)}
+            isOffline={isOffline}
           />
         );
       default:
@@ -112,10 +135,12 @@ export default function App() {
       {/* Overlays */}
       <AddSheet 
         isOpen={isAddSheetOpen} 
-        onClose={() => setIsAddSheetOpen(false)} 
+        onClose={() => {
+          setIsAddSheetOpen(false);
+          setAddSheetContext(null);
+        }} 
         onSave={handleAddSheetSave}
-        initialMealType={addSheetContext?.type}
-        existingMealId={addSheetContext?.mealId}
+        context={addSheetContext}
         isOffline={isOffline}
       />
       <SettingsSheet 

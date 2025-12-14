@@ -102,7 +102,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
     const diff = newVal - currentVal;
     if (diff === 0) return;
 
-    const newMacros = { ...macros, [key]: newVal.toString() };
+    const next = { ...macros, [key]: newVal.toString() };
     let remainder = -diff; 
     
     const others = ['p', 'f', 'c'].filter(k => k !== key) as ('p'|'f'|'c')[];
@@ -110,16 +110,35 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
     for (let i = 0; i < 2; i++) { 
          for (const otherKey of others) {
              if (remainder === 0) break;
-             const val = parseInt(newMacros[otherKey]) || 0;
+             const val = parseInt(next[otherKey]) || 0;
              let change = remainder;
              if (val + change < 0) change = -val;
              if (val + change > 100) change = 100 - val;
              
-             newMacros[otherKey] = (val + change).toString();
+             next[otherKey] = (val + change).toString();
              remainder -= change;
          }
     }
-    setMacros(newMacros);
+
+    // Финальная нормализация до 100%
+    const total = ['p','f','c'].reduce((sum, k) => sum + (parseInt(next[k as 'p'|'f'|'c']) || 0), 0);
+    if (total !== 100) {
+      const factor = 100 / (total || 1);
+      let acc = 0;
+      const normalized: { p: string; f: string; c: string } = { p: '0', f: '0', c: '0' };
+      (['p','f','c'] as ('p'|'f'|'c')[]).forEach((k, idx) => {
+        const raw = (parseInt(next[k]) || 0) * factor;
+        let rounded = Math.round(raw);
+        if (idx === 2) {
+          rounded = 100 - acc; // последнему отдаём остаток
+        }
+        acc += rounded;
+        normalized[k] = String(Math.max(0, Math.min(100, rounded)));
+      });
+      setMacros(normalized);
+    } else {
+      setMacros(next);
+    }
   };
 
   const derivedKcalForGrams = (pVal * 4) + (fVal * 9) + (cVal * 4);

@@ -1,6 +1,5 @@
-
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, Camera, Check, Trash2, Edit2, AlertCircle, Plus, ArrowLeft, ScanBarcode, Keyboard, Sparkles, RotateCcw, Minus, Calculator } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Search, Camera, Check, Trash2, ArrowLeft, Calculator } from 'lucide-react';
 import { SegmentedControl } from '../SegmentedControl';
 import { Card } from '../Card';
 import { Input } from '../Input';
@@ -9,15 +8,39 @@ import { ValueTrigger } from '../ValueTrigger';
 import { BottomSheet } from '../BottomSheet';
 import { UniversalPicker } from '../UniversalPicker';
 import { api } from '../../services/api';
-import { MealType, Product, SearchResult } from '../../types';
+import { AddSheetContext, MealType, NutritionBase, SearchResult } from '../../types';
 
 interface AddSheetProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: () => void;
   isOffline?: boolean;
-  initialMealType?: string;
-  existingMealId?: string | number;
+  context: AddSheetContext | null;
+}
+
+type DraftItem = {
+  draftId: string;
+  productId?: string | number;
+  itemId?: string | number;
+  name: string;
+  brand?: string;
+  grams: number;
+  base: NutritionBase;
+  kcal: number;
+};
+
+const MEAL_OPTIONS: MealType[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+
+const mealOptionsForUi = MEAL_OPTIONS.map(type => ({ label: type, value: type }));
+
+function formatTime(date: Date): string {
+  const h = date.getHours().toString().padStart(2, '0');
+  const m = date.getMinutes().toString().padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function mapMealTypeToBackend(type: MealType): 'breakfast' | 'lunch' | 'dinner' | 'snack' {
+  return type.toLowerCase() as 'breakfast' | 'lunch' | 'dinner' | 'snack';
 }
 
 export const AddSheet: React.FC<AddSheetProps> = ({ 
@@ -25,13 +48,13 @@ export const AddSheet: React.FC<AddSheetProps> = ({
   onClose, 
   onSave, 
   isOffline = false,
-  initialMealType,
-  existingMealId
+  context,
 }) => {
   const [sheetView, setSheetView] = useState<'main' | 'custom' | 'edit_nutrition'>('main');
   const [mealType, setMealType] = useState<MealType>('Breakfast');
   const [inputMethod, setInputMethod] = useState<'search' | 'photo'>('search');
-  const [products, setProducts] = useState<Product[]>([]);
+  const [items, setItems] = useState<DraftItem[]>([]);
+  const originalItemsRef = useRef<DraftItem[]>([]);
   
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,8 +65,8 @@ export const AddSheet: React.FC<AddSheetProps> = ({
   const [customForm, setCustomForm] = useState({ name: '', brand: '', kcal: 0, p: 0, f: 0, c: 0 });
   
   // Edit State
-  const [advancedEditId, setAdvancedEditId] = useState<number | string | null>(null);
-  const [advancedForm, setAdvancedForm] = useState({ k: 0, p: 0, f: 0, c: 0 });
+  const [advancedEditId, setAdvancedEditId] = useState<string | null>(null);
+  const [advancedForm, setAdvancedForm] = useState<NutritionBase>({ k: 0, p: 0, f: 0, c: 0 });
   
   // Status
   const [isSaving, setIsSaving] = useState(false);
@@ -65,23 +88,48 @@ export const AddSheet: React.FC<AddSheetProps> = ({
       setPickerConfig({ isOpen: true, title, value: val, min, max, step, unit, onConfirm });
   };
 
-  // Reset state on open
+  const isEditingExistingMeal = !!context?.meal;
+  const effectiveMealType: MealType = useMemo(() => {
+    if (context?.defaultMealType) return context.defaultMealType;
+    if (context?.meal?.type) return context.meal.type;
+    return mealType;
+  }, [context, mealType]);
+
+  // Reset state on open / context change
   useEffect(() => {
-    if (isOpen) {
-      setSheetView('main');
-      setSearchQuery('');
-      setSearchResults([]);
-      setInputMethod('search');
-      setProducts([]); 
-      setAdvancedEditId(null);
-      setCustomForm({ name: '', brand: '', kcal: 0, p: 0, f: 0, c: 0 });
-      setIsSaving(false);
-      setSaveError(null);
-      if (initialMealType) {
-          setMealType(initialMealType as MealType);
-      }
+    if (!isOpen) return;
+
+    setSheetView('main');
+    setSearchQuery('');
+    setSearchResults([]);
+    setInputMethod('search');
+    setIsSaving(false);
+    setSaveError(null);
+    setCustomForm({ name: '', brand: '', kcal: 0, p: 0, f: 0, c: 0 });
+    setAdvancedEditId(null);
+    setAdvancedForm({ k: 0, p: 0, f: 0, c: 0 });
+
+    const initialMealType: MealType = context?.defaultMealType || context?.meal?.type || 'Breakfast';
+    setMealType(initialMealType);
+
+    if (context?.meal) {
+      const mappedItems: DraftItem[] = context.meal.items.map(item => ({
+        draftId: String(item.item_id ?? item.id),
+        productId: item.productId ?? item.id,
+        itemId: item.item_id ?? item.id,
+        name: item.name,
+        brand: item.brand,
+        grams: item.grams,
+        base: item.base,
+        kcal: item.kcal,
+      }));
+      setItems(mappedItems);
+      originalItemsRef.current = mappedItems;
+    } else {
+      setItems([]);
+      originalItemsRef.current = [];
     }
-  }, [isOpen, initialMealType]);
+  }, [isOpen, context]);
 
   // Handle Search
   useEffect(() => {
@@ -103,12 +151,18 @@ export const AddSheet: React.FC<AddSheetProps> = ({
   const calculateKcal = (grams: number, baseKcal: number) => Math.round((grams / 100) * baseKcal);
 
   const handleAddProduct = (item: SearchResult) => {
-    // Generate temp ID for UI list
-    const tempId = Date.now().toString(); 
-    // VISUAL ONLY ESTIMATE for draft list. Not used for persistent data.
+    const draftId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const totalKcal = calculateKcal(item.grams, item.base.k);
-    const newProduct: Product = { ...item, id: tempId, kcal: totalKcal };
-    setProducts(prev => [...prev, newProduct]);
+    const newItem: DraftItem = {
+      draftId,
+      productId: item.id,
+      name: item.name,
+      brand: item.brand,
+      grams: item.grams,
+      base: item.base,
+      kcal: totalKcal,
+    };
+    setItems(prev => [...prev, newItem]);
     setSearchQuery('');
     setSearchResults([]);
   };
@@ -117,95 +171,163 @@ export const AddSheet: React.FC<AddSheetProps> = ({
     if (!customForm.name) return;
     setIsSaving(true);
     try {
-        // Create product immediately in backend
         const res = await api.products.create({
-            name: customForm.name,
-            brand: customForm.brand,
-            base: { k: customForm.kcal, p: customForm.p, f: customForm.f, c: customForm.c }
+          name: customForm.name,
+          brand: customForm.brand || undefined,
+          nutrition_per_100g: {
+            calories: customForm.kcal,
+            protein: customForm.p,
+            fat: customForm.f,
+            carbs: customForm.c,
+          },
         });
-        
-        // Response format handling might need adjustment based on real API
-        // Assuming returns { product_id: ... }
-        const productId = (res as any).product_id || (res as any).id;
+        const productId = (res as any).id;
 
-        const newProduct: Product = {
-            id: productId,
-            name: customForm.name,
-            brand: customForm.brand || 'Custom',
-            grams: 100,
-            base: { k: customForm.kcal, p: customForm.p, f: customForm.f, c: customForm.c },
-            kcal: customForm.kcal
+        const draftId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const newItem: DraftItem = {
+          draftId,
+          productId,
+          name: customForm.name,
+          brand: customForm.brand || 'Custom',
+          grams: 100,
+          base: { k: customForm.kcal, p: customForm.p, f: customForm.f, c: customForm.c },
+          kcal: customForm.kcal,
         };
-        setProducts(prev => [...prev, newProduct]);
+        setItems(prev => [...prev, newItem]);
         setSheetView('main');
         setCustomForm({ name: '', brand: '', kcal: 0, p: 0, f: 0, c: 0 });
     } catch (e) {
-        console.error("Failed to create custom product", e);
+        console.error('Failed to create custom product', e);
     } finally {
         setIsSaving(false);
     }
   };
 
-  const updateGrams = (id: string | number, newGrams: number) => {
-    setProducts(prev => prev.map(p => {
-      if (p.id !== id) return p;
-      return { ...p, grams: newGrams, kcal: calculateKcal(newGrams, p.base.k) };
+  const updateGrams = (draftId: string, newGrams: number) => {
+    setItems(prev => prev.map(item => {
+      if (item.draftId !== draftId) return item;
+      return { ...item, grams: newGrams, kcal: calculateKcal(newGrams, item.base.k) };
     }));
   };
 
-  const handleDelete = (id: string | number) => {
-    setProducts(prev => prev.filter(p => p.id !== id));
+  const handleDelete = (draftId: string) => {
+    setItems(prev => prev.filter(item => item.draftId !== draftId));
   };
 
-  const openAdvancedEdit = (product: Product) => {
-    setAdvancedEditId(product.id);
+  const openAdvancedEdit = (item: DraftItem) => {
+    setAdvancedEditId(item.draftId);
     setAdvancedForm({ 
-      k: product.base.k, 
-      p: product.base.p, 
-      f: product.base.f, 
-      c: product.base.c 
+      k: item.base.k, 
+      p: item.base.p, 
+      f: item.base.f, 
+      c: item.base.c,
     });
     setSheetView('edit_nutrition');
   };
 
   const saveAdvancedEdit = () => {
-    if (advancedEditId === null) return;
+    if (!advancedEditId) return;
     const newBase = { ...advancedForm };
-    setProducts(prev => prev.map(p => {
-      if (p.id !== advancedEditId) return p;
-      return { ...p, base: newBase, kcal: calculateKcal(p.grams, newBase.k) };
+    setItems(prev => prev.map(item => {
+      if (item.draftId !== advancedEditId) return item;
+      return { ...item, base: newBase, kcal: calculateKcal(item.grams, newBase.k) };
     }));
     setSheetView('main');
     setAdvancedEditId(null);
   };
 
   const handleConfirm = async () => {
-    if (products.length === 0) return;
+    if (items.length === 0 || isOffline) return;
     setIsSaving(true);
     setSaveError(null);
+
     try {
-        // Log all items individually
-        // Timestamp is "now" for logging
-        const now = new Date().toISOString();
-        
-        for (const p of products) {
-            await api.logFood({
-                product_id: p.id, // Assuming id is valid from search/create
-                grams: p.grams,
-                timestamp: now,
-                meal_type: mealType // Context for grouping
-            });
+      const date = context?.date ?? new Date();
+      const dateStr = date.toISOString().split('T')[0];
+      const backendMealType = mapMealTypeToBackend(effectiveMealType);
+      const timeStr = context?.defaultTime || formatTime(new Date());
+
+      if (!isEditingExistingMeal) {
+        // Create new meal then add items
+        const meal = await api.meals.create({
+          date: dateStr,
+          type: backendMealType,
+          time: timeStr,
+          title: effectiveMealType,
+        });
+
+        const promises = items.map(item => {
+          if (!item.productId) return Promise.resolve();
+          return api.meals.addItem(meal.id, {
+            product_id: item.productId,
+            grams: item.grams,
+          });
+        });
+
+        await Promise.all(promises);
+      } else if (context?.meal) {
+        // Edit existing meal: diff items
+        const mealId = context.meal.id;
+
+        const originalById = new Map(
+          originalItemsRef.current
+            .filter(i => i.itemId != null)
+            .map(i => [i.itemId as string | number, i])
+        );
+
+        const currentById = new Map(
+          items
+            .filter(i => i.itemId != null)
+            .map(i => [i.itemId as string | number, i])
+        );
+
+        const ops: Promise<any>[] = [];
+
+        // Deletes
+        for (const [itemId] of originalById) {
+          if (!currentById.has(itemId)) {
+            ops.push(api.meals.deleteItem(mealId, itemId));
+          }
         }
-        
-        onSave(); 
-    } catch (e) {
-        setIsSaving(false);
-        setSaveError("Failed to save.");
-        console.error(e);
+
+        // Updates
+        for (const [itemId, current] of currentById) {
+          const original = originalById.get(itemId);
+          if (original && original.grams !== current.grams) {
+            ops.push(api.meals.updateItem(mealId, itemId, { grams: current.grams }));
+          }
+        }
+
+        // New items
+        for (const item of items) {
+          if (!item.itemId && item.productId) {
+            ops.push(
+              api.meals.addItem(mealId, {
+                product_id: item.productId,
+                grams: item.grams,
+              })
+            );
+          }
+        }
+
+        if (ops.length) {
+          await Promise.all(ops);
+        }
+      }
+
+      onSave();
+    } catch (e: any) {
+      console.error('Failed to save meal', e);
+      setSaveError(e?.message || 'Failed to save.');
+      setIsSaving(false);
     }
   };
 
-  let titleNode: React.ReactNode = existingMealId ? `Add to ${initialMealType}` : 'Add Meal';
+  const showMealTypeSelector = !context?.defaultMealType && !context?.meal;
+
+  let titleNode: React.ReactNode = isEditingExistingMeal
+    ? `Add to ${context?.meal?.title || context?.defaultMealType || 'Meal'}`
+    : 'Add Meal';
   let leftActionNode: React.ReactNode = undefined;
   let footerNode: React.ReactNode = undefined;
 
@@ -214,7 +336,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
         <div className="space-y-3">
             <Button
                 variant="primary"
-                disabled={products.length === 0 || isSaving}
+                disabled={items.length === 0 || isSaving || isOffline}
                 isLoading={isSaving}
                 onClick={handleConfirm}
                 className="w-full"
@@ -226,7 +348,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
         </div>
       );
   } else if (sheetView === 'custom') {
-      titleNode = "New Product";
+      titleNode = 'New Product';
       leftActionNode = (
           <button onClick={() => setSheetView('main')} className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-600 transition-colors">
               <ArrowLeft size={24} />
@@ -238,7 +360,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
           </Button>
       );
   } else if (sheetView === 'edit_nutrition') {
-      titleNode = "Edit Nutrition";
+      titleNode = 'Edit Nutrition';
       leftActionNode = (
           <button onClick={() => setSheetView('main')} className="p-2 -ml-2 rounded-full hover:bg-gray-100 text-gray-600 transition-colors">
               <ArrowLeft size={24} />
@@ -251,8 +373,6 @@ export const AddSheet: React.FC<AddSheetProps> = ({
       );
   }
 
-  const MEAL_OPTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(type => ({ label: type, value: type }));
-
   return (
     <>
       <BottomSheet
@@ -264,13 +384,13 @@ export const AddSheet: React.FC<AddSheetProps> = ({
       >
         {sheetView === 'main' && (
             <>
-                {!initialMealType && !existingMealId && (
+                {showMealTypeSelector && (
                     <div className="mb-6">
                         <SegmentedControl
                             value={mealType}
                             onChange={(val) => setMealType(val as MealType)}
                             disabled={isOffline}
-                            options={MEAL_OPTIONS}
+                            options={mealOptionsForUi}
                         />
                     </div>
                 )}
@@ -314,7 +434,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
                                                 <div className="text-xs text-gray-500">{item.brand} • {item.grams}g</div>
                                             </div>
                                             <div className="w-6 h-6 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                                <Plus size={14} />
+                                                <Check size={14} />
                                             </div>
                                         </button>
                                     ))}
@@ -330,39 +450,39 @@ export const AddSheet: React.FC<AddSheetProps> = ({
 
                 {/* List Review */}
                 <div className={`space-y-4 relative ${isOffline ? 'opacity-50' : ''}`}>
-                    {products.length === 0 ? (
+                    {items.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-10 text-gray-400 text-sm border-2 border-dashed border-gray-100 rounded-2xl bg-gray-50/30">
                             <span className="font-medium">No items added yet</span>
                         </div>
                     ) : (
-                        products.map((product) => (
-                            <div key={product.id} className="flex overflow-x-auto snap-x no-scrollbar rounded-2xl shadow-sm group">
+                        items.map((item) => (
+                            <div key={item.draftId} className="flex overflow-x-auto snap-x no-scrollbar rounded-2xl shadow-sm group">
                                 <Card variant="compact" className={`w-full flex-shrink-0 snap-center z-10 transition-colors`}>
                                     <div className="flex justify-between items-start w-full mb-1">
                                         <div className="flex gap-4 items-center flex-1">
                                             <div className="w-12 h-12 bg-gray-50 rounded-xl flex-shrink-0 flex items-center justify-center text-2xl">🍎</div>
                                             <div className="flex-1">
-                                                <div className="font-semibold text-gray-900 text-base mb-1">{product.name}</div>
+                                                <div className="font-semibold text-gray-900 text-base mb-1">{item.name}</div>
                                                 <ValueTrigger 
                                                     variant="inline"
-                                                    value={product.grams}
+                                                    value={item.grams}
                                                     unit="g"
-                                                    onClick={() => openPicker(product.name, product.grams, 0, 5000, 5, 'g', (v) => updateGrams(product.id, v))}
+                                                    onClick={() => openPicker(item.name, item.grams, 0, 5000, 5, 'g', (v) => updateGrams(item.draftId, v))}
                                                 />
                                             </div>
                                         </div>
                                         <div className="flex flex-col items-end">
-                                            <span className="font-bold text-gray-900 text-base">{product.kcal}</span>
+                                            <span className="font-bold text-gray-900 text-base">{item.kcal}</span>
                                             <span className="text-[10px] text-gray-400 font-medium uppercase">kcal</span>
                                         </div>
                                     </div>
                                     <div className="pl-[4rem] mt-2">
-                                        <button onClick={(e) => { e.stopPropagation(); openAdvancedEdit(product); }} className="flex items-center gap-1 text-[11px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors">
+                                        <button onClick={(e) => { e.stopPropagation(); openAdvancedEdit(item); }} className="flex items-center gap-1 text-[11px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors">
                                             <Calculator size={12} /> Edit nutrition
                                         </button>
                                     </div>
                                 </Card>
-                                <div className="w-[4.5rem] flex-shrink-0 snap-center bg-rose-500 flex items-center justify-center text-white cursor-pointer ml-[-1rem] pl-4 rounded-r-2xl" onClick={() => handleDelete(product.id)}>
+                                <div className="w-[4.5rem] flex-shrink-0 snap-center bg-rose-500 flex items-center justify-center text-white cursor-pointer ml-[-1rem] pl-4 rounded-r-2xl" onClick={() => handleDelete(item.draftId)}>
                                     <Trash2 size={20} />
                                 </div>
                             </div>
@@ -385,7 +505,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
                         <ValueTrigger 
                             value={customForm.kcal} 
                             unit="kcal" 
-                            onClick={() => openPicker("Calories / 100g", customForm.kcal, 0, 1000, 50, 'kcal', (v) => setCustomForm({...customForm, kcal: v}))}
+                            onClick={() => openPicker('Calories / 100g', customForm.kcal, 0, 1000, 50, 'kcal', (v) => setCustomForm({...customForm, kcal: v}))}
                         />
                     </div>
 
@@ -417,7 +537,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
                     <ValueTrigger 
                         value={advancedForm.k}
                         unit="kcal"
-                        onClick={() => openPicker("Calories / 100g", advancedForm.k, 0, 1000, 50, 'kcal', (v) => setAdvancedForm({...advancedForm, k: v}))}
+                        onClick={() => openPicker('Calories / 100g', advancedForm.k, 0, 1000, 50, 'kcal', (v) => setAdvancedForm({...advancedForm, k: v}))}
                     />
                  </div>
                  <div className="grid grid-cols-3 gap-3">

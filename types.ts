@@ -1,4 +1,3 @@
-
 export interface NutritionBase {
   k: number; // Calories
   p: number; // Protein
@@ -17,6 +16,7 @@ export interface Product {
 
 export interface MealItem extends Product {
   item_id?: string | number;
+  productId?: string | number;
 }
 
 export interface Meal {
@@ -25,7 +25,7 @@ export interface Meal {
   title: string;
   kcal: number;
   items: MealItem[];
-  type?: string;
+  type?: MealType;
 }
 
 export interface DailyStats {
@@ -35,6 +35,11 @@ export interface DailyStats {
   fats: number;
   carbs: number;
   meals: Meal[];
+  status?: {
+    code: 'under' | 'ok' | 'over';
+    label: string;
+    insight: string;
+  };
 }
 
 export interface SearchResult extends Product {}
@@ -46,4 +51,11 @@ export interface AppSettings {
   tolerance: number;
   macroMode: 'percent' | 'grams';
   macros: { p: string; f: string; c: string };
+}
+
+export interface AddSheetContext {
+  date: Date;
+  meal?: Meal;
+  defaultMealType?: MealType;
+  defaultTime?: string;
 }

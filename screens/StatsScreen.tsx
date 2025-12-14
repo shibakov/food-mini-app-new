@@ -5,30 +5,45 @@ import { Card } from '../components/Card';
 import { PageHeader } from '../components/layout/PageHeader';
 import { api } from '../services/api';
 
-interface StatsScreenProps {
-  onSettingsClick: () => void;
-  isLoading: boolean;
-  isEmpty: boolean;
+interface StatsDay {
+  kcal: number;
+  p: number;
+  f: number;
+  c: number;
+  label?: string;
+  status?: string;
 }
 
-const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading: globalLoading, isEmpty: globalEmpty }) => {
+interface StatsScreenProps {
+  onSettingsClick: () => void;
+  isOffline: boolean;
+}
+
+const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isOffline }) => {
   const [period, setPeriod] = useState<7 | 14 | 30>(7);
-  const [data, setData] = useState<any[]>([]);
+  const [data, setData] = useState<StatsDay[]>([]);
   const [localLoading, setLocalLoading] = useState(false);
 
   useEffect(() => {
+    if (isOffline) {
+      setLocalLoading(false);
+      return;
+    }
     setLocalLoading(true);
-    const rangeMap = { 7: '7d', 14: '14d', 30: '30d' } as const;
-    api.stats.get(rangeMap[period]).then((res: any) => {
-        setData(res.history || []); // Assuming API returns { history: [...] }
+    const rangeMap: Record<7 | 14 | 30, '7d' | '14d' | '30d'> = { 7: '7d', 14: '14d', 30: '30d' };
+    api.stats
+      .get(rangeMap[period])
+      .then((res: { history?: StatsDay[] }) => {
+        setData(res.history ?? []);
         setLocalLoading(false);
-    }).catch(e => {
-        console.error("Failed to fetch stats", e);
+      })
+      .catch((e: unknown) => {
+        console.error('Failed to fetch stats', e);
         setLocalLoading(false);
-    });
-  }, [period]);
+      });
+  }, [period, isOffline]);
 
-  const isLoading = globalLoading || localLoading;
+  const isLoading = localLoading;
   const isDataEmpty = data.length === 0;
 
   const targetKcal = 2000;
@@ -38,14 +53,22 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading: g
   const maxScale = 3000;
   const targetPct = (targetKcal / maxScale) * 100;
 
-  const daysOnTrack = data.filter(d => d.kcal >= lowerLimit && d.kcal <= upperLimit).length;
-  const daysOver = data.filter(d => d.kcal > upperLimit).length;
-  const daysUnder = data.filter(d => d.kcal < lowerLimit).length;
+  const daysOnTrack = data.filter((d: StatsDay) => d.kcal >= lowerLimit && d.kcal <= upperLimit).length;
+  const daysOver = data.filter((d: StatsDay) => d.kcal > upperLimit).length;
+  const daysUnder = data.filter((d: StatsDay) => d.kcal < lowerLimit).length;
   
-  const avgKcal = data.length ? Math.round(data.reduce((acc, c) => acc + c.kcal, 0) / data.length) : 0;
-  const avgProtein = data.length ? Math.round(data.reduce((acc, c) => acc + c.p, 0) / data.length) : 0;
-  const avgFats = data.length ? Math.round(data.reduce((acc, c) => acc + c.f, 0) / data.length) : 0;
-  const avgCarbs = data.length ? Math.round(data.reduce((acc, c) => acc + c.c, 0) / data.length) : 0;
+  const avgKcal = data.length
+    ? Math.round(data.reduce((acc: number, c: StatsDay) => acc + c.kcal, 0) / data.length)
+    : 0;
+  const avgProtein = data.length
+    ? Math.round(data.reduce((acc: number, c: StatsDay) => acc + c.p, 0) / data.length)
+    : 0;
+  const avgFats = data.length
+    ? Math.round(data.reduce((acc: number, c: StatsDay) => acc + c.f, 0) / data.length)
+    : 0;
+  const avgCarbs = data.length
+    ? Math.round(data.reduce((acc: number, c: StatsDay) => acc + c.c, 0) / data.length)
+    : 0;
 
   const getBarColor = (kcal: number) => {
     if (kcal > upperLimit) return 'bg-rose-400';
@@ -132,9 +155,9 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isLoading: g
                     <h2 className="text-sm font-bold text-gray-900 px-1 mb-5 tracking-tight">Macro Trends</h2>
                     <div className="space-y-6">
                         {[
-                            { label: 'Protein', avg: avgProtein, data: data.map(d => d.p), max: 200, color: 'bg-blue-500' },
-                            { label: 'Fats', avg: avgFats, data: data.map(d => d.f), max: 100, color: 'bg-amber-400' },
-                            { label: 'Carbs', avg: avgCarbs, data: data.map(d => d.c), max: 300, color: 'bg-orange-400' }
+                            { label: 'Protein', avg: avgProtein, data: data.map((d: StatsDay) => d.p), max: 200, color: 'bg-blue-500' },
+                            { label: 'Fats', avg: avgFats, data: data.map((d: StatsDay) => d.f), max: 100, color: 'bg-amber-400' },
+                            { label: 'Carbs', avg: avgCarbs, data: data.map((d: StatsDay) => d.c), max: 300, color: 'bg-orange-400' }
                         ].map((macro, idx) => (
                             <div key={idx} className="flex flex-col gap-2">
                                 <div className="flex justify-between items-baseline px-1">
