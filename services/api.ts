@@ -13,6 +13,24 @@ type JsonRecord = Record<string, any>;
 const API_BASE_URL = 'https://gateway-api-food-mini-app-production.up.railway.app/v1';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const method = (options.method || 'GET').toUpperCase();
+  const bodyPreview =
+    options.body && typeof options.body === 'string'
+      ? (() => {
+          try {
+            return JSON.stringify(JSON.parse(options.body), null, 2);
+          } catch {
+            return String(options.body);
+          }
+        })()
+      : undefined;
+
+  console.log('[gateway] calling backend', {
+    url: `${API_BASE_URL}${path}`,
+    method,
+    body: bodyPreview,
+  });
+
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       headers: {
@@ -24,8 +42,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
     const payload = await res.json().catch(() => null);
 
+    console.log('[gateway] backend response', {
+      url: `${API_BASE_URL}${path}`,
+      method,
+      status: res.status,
+      ok: res.ok,
+      payload,
+    });
+
     if (!res.ok) {
-      const errorMessage = (payload && payload.error?.message) || `API error: ${res.status}`;
+      const errorMessage = (payload && (payload as any).error?.message) || `API error: ${res.status}`;
+      console.error('[gateway] backend error', { url: `${API_BASE_URL}${path}`, method, errorMessage });
       throw new Error(errorMessage);
     }
 
@@ -36,8 +63,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       const hint = offline
         ? 'offline or gateway unreachable'
         : 'network or CORS error while calling gateway';
+      console.error('[gateway] request failed (network)', { url: `${API_BASE_URL}${path}`, method, hint, error: e });
       throw new Error(`Request failed: ${hint}`);
     }
+    console.error('[gateway] request failed (unexpected)', { url: `${API_BASE_URL}${path}`, method, error: e });
     throw e as Error;
   }
 }

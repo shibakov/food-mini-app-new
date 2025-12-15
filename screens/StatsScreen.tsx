@@ -33,8 +33,9 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isOffline })
     const rangeMap: Record<7 | 14 | 30, '7d' | '14d' | '30d'> = { 7: '7d', 14: '14d', 30: '30d' };
     api.stats
       .get(rangeMap[period])
-      .then((res: { history?: StatsDay[] }) => {
-        setData(res.history ?? []);
+      .then((res: any) => {
+        const history = res && Array.isArray((res as any).history) ? (res as any).history : [];
+        setData(history as StatsDay[]);
         setLocalLoading(false);
       })
       .catch((e: unknown) => {
