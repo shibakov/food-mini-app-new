@@ -249,16 +249,15 @@ export const AddSheet: React.FC<AddSheetProps> = ({
 
       if (!isEditingExistingMeal) {
         // Create new meal then add items
-        const meal = await api.meals.create({
+        const { meal_id } = await api.meals.create({
           date: dateStr,
-          type: backendMealType,
-          time: timeStr,
-          title: effectiveMealType,
+          meal_type: backendMealType,
+          meal_time: timeStr,
         });
 
         const promises = items.map(item => {
           if (!item.productId) return Promise.resolve();
-          return api.meals.addItem(meal.id, {
+          return api.meals.addItem(meal_id, {
             product_id: item.productId,
             grams: item.grams,
           });
