@@ -23,6 +23,22 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isOffline })
   const [period, setPeriod] = useState<7 | 14 | 30>(7);
   const [data, setData] = useState<StatsDayViewModel[]>([]);
   const [localLoading, setLocalLoading] = useState(false);
+  const [targetKcal, setTargetKcal] = useState(2000);
+  const [tolerance, setTolerance] = useState(200);
+
+  // Keep stats charts aligned with current user settings
+  useEffect(() => {
+    if (isOffline) return;
+    api.settings
+      .get()
+      .then((s) => {
+        setTargetKcal(s.calorieTarget);
+        setTolerance(s.tolerance);
+      })
+      .catch((e: unknown) => {
+        console.error('Failed to load settings for stats', e);
+      });
+  }, [isOffline]);
 
   useEffect(() => {
     if (isOffline) {
@@ -58,11 +74,9 @@ const StatsScreen: React.FC<StatsScreenProps> = ({ onSettingsClick, isOffline })
   const isLoading = localLoading;
   const isDataEmpty = data.length === 0;
 
-  const targetKcal = 2000;
-  const tolerance = 200;
   const upperLimit = targetKcal + tolerance;
   const lowerLimit = targetKcal - tolerance;
-  const maxScale = 3000;
+  const maxScale = Math.max(targetKcal + tolerance * 2, 3000);
   const targetPct = (targetKcal / maxScale) * 100;
 
   const avgKcal = data.length

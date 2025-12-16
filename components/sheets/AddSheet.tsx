@@ -170,6 +170,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
   const saveCustomProduct = async () => {
     if (!customForm.name) return;
     setIsSaving(true);
+    setSaveError(null);
     try {
         const res = await api.products.create({
           name: customForm.name,
@@ -181,7 +182,11 @@ export const AddSheet: React.FC<AddSheetProps> = ({
             carbs: customForm.c,
           },
         });
-        const productId = (res as any).id;
+        const productId = (res as any).product_id ?? (res as any).id;
+
+        if (!productId) {
+          throw new Error('Product was created without a valid id');
+        }
 
         const draftId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const newItem: DraftItem = {
@@ -198,6 +203,7 @@ export const AddSheet: React.FC<AddSheetProps> = ({
         setCustomForm({ name: '', brand: '', kcal: 0, p: 0, f: 0, c: 0 });
     } catch (e) {
         console.error('Failed to create custom product', e);
+        setSaveError(e instanceof Error ? e.message : 'Failed to create product');
     } finally {
         setIsSaving(false);
     }
@@ -354,9 +360,18 @@ export const AddSheet: React.FC<AddSheetProps> = ({
           </button>
       );
       footerNode = (
-          <Button variant="primary" className="w-full" disabled={!customForm.name || isSaving} isLoading={isSaving} onClick={saveCustomProduct}>
+          <div className="space-y-2">
+            <Button
+              variant="primary"
+              className="w-full"
+              disabled={!customForm.name || isSaving}
+              isLoading={isSaving}
+              onClick={saveCustomProduct}
+            >
               Add Product
-          </Button>
+            </Button>
+            {saveError && <div className="text-center text-xs text-rose-500 font-bold">{saveError}</div>}
+          </div>
       );
   } else if (sheetView === 'edit_nutrition') {
       titleNode = 'Edit Nutrition';

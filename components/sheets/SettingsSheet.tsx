@@ -21,6 +21,7 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
   const [macroMode, setMacroMode] = useState<'percent' | 'grams'>('percent');
   const [macros, setMacros] = useState({ p: '30', f: '35', c: '35' });
   const [loading, setLoading] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   
   // Picker State
   const [pickerConfig, setPickerConfig] = useState<{
@@ -38,13 +39,21 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
   useEffect(() => {
     if (isOpen && !isOffline) {
       setLoading(true);
-      api.settings.get().then(settings => {
-        setCalorieTarget(settings.calorieTarget.toString());
-        setTolerance(settings.tolerance);
-        setMacroMode(settings.macroMode);
-        setMacros(settings.macros);
-        setLoading(false);
-      }).catch(() => setLoading(false));
+      setSaveError(null);
+      api.settings
+        .get()
+        .then(settings => {
+          setCalorieTarget(settings.calorieTarget.toString());
+          setTolerance(settings.tolerance);
+          setMacroMode(settings.macroMode);
+          setMacros(settings.macros);
+          setLoading(false);
+        })
+        .catch((e: unknown) => {
+          console.error('Failed to load settings', e);
+          setSaveError('Failed to load settings from server');
+          setLoading(false);
+        });
     }
   }, [isOpen, isOffline]);
 
@@ -70,21 +79,25 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
   }
 
   const handleSave = async () => {
-    if (!validationError && !isOffline) {
-      setLoading(true);
-      try {
-          await api.settings.save({
-            calorieTarget: targetVal,
-            tolerance,
-            macroMode,
-            macros
-          });
-          onClose();
-      } catch (e) {
-          console.error(e);
-      } finally {
-          setLoading(false);
-      }
+    if (validationError || isOffline) return;
+    setLoading(true);
+    setSaveError(null);
+    try {
+      await api.settings.save({
+        calorieTarget: targetVal,
+        tolerance,
+        macroMode,
+        macros,
+      });
+      onClose();
+    } catch (e: any) {
+      console.error('Failed to save settings', e);
+      const message =
+        (e && typeof e.message === 'string' && e.message) ||
+        'Failed to save settings. Please check your values and try again.';
+      setSaveError(message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -152,9 +165,23 @@ export const SettingsSheet: React.FC<SettingsSheetProps> = ({ isOpen, onClose, i
         title="Settings"
         className="bg-gray-50/50"
         footer={
-            <Button variant="primary" onClick={handleSave} disabled={!!validationError || isOffline || loading} isLoading={loading} className="w-full" icon={<Check size={20} />}>
+            <div className="space-y-2">
+              <Button
+                variant="primary"
+                onClick={handleSave}
+                disabled={!!validationError || isOffline || loading}
+                isLoading={loading}
+                className="w-full"
+                icon={<Check size={20} />}
+              >
                 Save Changes
-            </Button>
+              </Button>
+              {saveError && (
+                <div className="text-[11px] text-rose-600 font-semibold text-center px-1">
+                  {saveError}
+                </div>
+              )}
+            </div>
         }
         >
             <div className={`space-y-6 pb-4 ${isOffline ? 'opacity-70' : ''}`}>

@@ -47,6 +47,8 @@ const MainScreen: React.FC<MainScreenProps> = ({
   const [selectedMealId, setSelectedMealId] = useState<string | number | null>(
     null
   );
+  const [selectedMeal, setSelectedMeal] = useState<Meal | null>(null);
+  const [isMealLoading, setIsMealLoading] = useState(false);
   const [selectedDateIndex, setSelectedDateIndex] = useState(3);
 
   // Picker State
@@ -100,7 +102,8 @@ const MainScreen: React.FC<MainScreenProps> = ({
   const [isAnimating, setIsAnimating] = useState(false);
 
   const meals = stats?.meals || [];
-  const selectedMeal = meals.find((m) => m.id === selectedMealId);
+  const selectedMealSummary =
+    meals.find((m) => m.id === selectedMealId) || null;
 
   // Generate dates
   const calendarDates = useMemo(() => {
@@ -193,6 +196,21 @@ const MainScreen: React.FC<MainScreenProps> = ({
   }
 
   // Handlers
+  const handleMealClick = async (id: string | number) => {
+    if (isOffline) return;
+    setSelectedMealId(id);
+    setIsMealLoading(true);
+    setSelectedMeal(null);
+    try {
+      const full = await api.meals.get(id);
+      setSelectedMeal(full);
+    } catch (e) {
+      console.error("Failed to load meal details", e);
+    } finally {
+      setIsMealLoading(false);
+    }
+  };
+
   const handleUpdateItemGrams = async (
     mealId: string | number,
     itemId: string | number,
@@ -201,6 +219,16 @@ const MainScreen: React.FC<MainScreenProps> = ({
     try {
       await api.meals.updateItem(mealId, itemId, { grams: newGrams });
       await fetchData(); // Refresh summary from backend
+
+      // If the details sheet for this meal is open, refresh its data too
+      if (selectedMealId === mealId) {
+        try {
+          const full = await api.meals.get(mealId);
+          setSelectedMeal(full);
+        } catch (err) {
+          console.error("Failed to refresh meal details after update", err);
+        }
+      }
     } catch (e) {
       console.error("Failed to update grams", e);
     }
@@ -210,6 +238,11 @@ const MainScreen: React.FC<MainScreenProps> = ({
     try {
       await api.meals.delete(id);
       await fetchData(); // Refresh summary from backend
+      if (selectedMealId === id) {
+        setSelectedMealId(null);
+        setSelectedMeal(null);
+        setIsMealLoading(false);
+      }
       onDeleteMeal();
     } catch (e) {
       console.error("Failed to delete meal", e);
@@ -354,7 +387,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
         onSwipeStart={handleSwipeStart}
         onSwipeProgress={handleSwipeProgress}
         onSwipeEnd={handleSwipeEnd}
-        disabled={!!selectedMeal}
+        disabled={selectedMealId !== null}
       >
         <div className="relative w-full h-full">
           <div
@@ -378,7 +411,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
                 onAddClick({ date: calendarDates[selectedDateIndex].fullDate })
               }
               onDeleteMeal={handleMealDelete}
-              onMealClick={setSelectedMealId}
+              onMealClick={handleMealClick}
               macros={macros}
             />
           </div>
@@ -412,21 +445,25 @@ const MainScreen: React.FC<MainScreenProps> = ({
 
       {/* Details Sheet */}
       <BottomSheet
-        isOpen={!!selectedMeal}
-        onClose={() => setSelectedMealId(null)}
+        isOpen={selectedMealId !== null}
+        onClose={() => {
+          setSelectedMealId(null);
+          setSelectedMeal(null);
+          setIsMealLoading(false);
+        }}
         title={
-          selectedMeal ? (
+          selectedMealSummary ? (
             <div className="flex flex-col">
               <div className="text-xl font-bold text-gray-900 tracking-tight">
-                {selectedMeal.title}
+                {selectedMealSummary.title}
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                  {selectedMeal.time}
+                  {selectedMealSummary.time}
                 </span>
                 <span className="w-0.5 h-0.5 rounded-full bg-gray-300" />
                 <span className="text-xs font-bold text-gray-900">
-                  {selectedMeal.kcal} kcal
+                  {selectedMealSummary.kcal} kcal
                 </span>
               </div>
             </div>
@@ -444,7 +481,7 @@ const MainScreen: React.FC<MainScreenProps> = ({
                 defaultTime: selectedMeal.time,
               })
             }
-            disabled={isOffline}
+            disabled={isOffline || isMealLoading || !selectedMeal}
             className="w-full"
             icon={<Plus size={20} />}
           >
@@ -452,7 +489,12 @@ const MainScreen: React.FC<MainScreenProps> = ({
           </Button>
         }
       >
-        {selectedMeal && (
+        {isMealLoading && (
+          <div className="py-6 text-center text-xs text-gray-400">
+            Loading meal...
+          </div>
+        )}
+        {!isMealLoading && selectedMeal && (
           <div className="space-y-2">
             {selectedMeal.items.map((item) => {
               return (
